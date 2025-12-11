@@ -12,5 +12,8 @@
         "destination": "/200.html"
       }
     ]
+  },
+  "firestore": {
+    "rules": "firestore.rules"
   }
 }
