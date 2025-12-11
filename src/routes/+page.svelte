@@ -292,6 +292,20 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 		return sortByDateDesc(a, b);
 	};
 
+	const resetLiveFeedState = () => {
+		liveJobs = [];
+		pastJobs = [];
+		todayJobs = [];
+		olderJobs = [];
+		pinnedJobs = [];
+		liveCursor = null;
+		pastCursor = null;
+		hasMore = false;
+		loadingMore = false;
+		error = '';
+		loading = true;
+	};
+
 	const subscribeToUserData = () => {
 		if (!browser || !userId) return;
 		const db = getDb();
@@ -360,6 +374,8 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 
 	const startLiveSubscription = () => {
 		if (!browser) return;
+		error = '';
+		loading = true;
 		try {
 			const db = getDb();
 			if (!db) throw new Error('Firestore not available');
@@ -394,6 +410,13 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 			error = err instanceof Error ? err.message : 'Failed to load jobs';
 			loading = false;
 		}
+	};
+
+	const restartLiveSubscription = () => {
+		liveUnsubscribe?.();
+		liveUnsubscribe = null;
+		resetLiveFeedState();
+		startLiveSubscription();
 	};
 
 	const fetchPastJobs = async () => {
@@ -493,14 +516,19 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 			if (!user) {
 				jobInteractionsUnsubscribe?.();
 				companyStatusUnsubscribe?.();
+				liveUnsubscribe?.();
+				liveUnsubscribe = null;
 				lastUserSubscriptionId = null;
 				jobInteractions = {};
 				companyStatuses = {};
 				hydratedPinnedJobs = {};
+				resetLiveFeedState();
+				loading = false;
 			} else {
 				hydrateJobInteractionsFromStorage();
 				hydrateCompanyStatusesFromStorage();
 				subscribeToUserData();
+				restartLiveSubscription();
 			}
 		});
 	};
