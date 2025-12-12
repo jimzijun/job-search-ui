@@ -1,12 +1,13 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { goto } from '$app/navigation';
 	import { onDestroy, onMount } from 'svelte';
-import {
-	collection,
-	doc,
-	getDoc,
-	getDocs,
-	limit,
+	import {
+		collection,
+		doc,
+		getDoc,
+		getDocs,
+		limit,
 	onSnapshot,
 	orderBy,
 	query,
@@ -92,6 +93,8 @@ let navCollapsed = false;
 let layoutEl: HTMLDivElement | null = null;
 let authReady = false;
 let authError = '';
+let jobLookupId = '';
+let jobLookupError = '';
 
 	const navLinks = [
 		{ href: '#status-manager', label: 'Company status' },
@@ -99,6 +102,20 @@ let authError = '';
 		{ href: '#new-jobs', label: 'New jobs' },
 		{ href: '#recent-jobs', label: 'Recent jobs' }
 	];
+
+	const openJobById = () => {
+		const trimmed = jobLookupId.trim();
+		if (!trimmed) {
+			jobLookupError = 'Enter a job id';
+			return;
+		}
+		jobLookupError = '';
+		goto(`/jobs/${encodeURIComponent(trimmed)}`);
+	};
+
+	$: if (jobLookupError && jobLookupId.trim()) {
+		jobLookupError = '';
+	}
 
 	const hydrateJobInteractionsFromStorage = () => {
 		if (!browser || !userId) return;
@@ -695,6 +712,26 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 					Selections sync to Firestore at <code>users/{userId || '…'}</code>
 				</p>
 			</div>
+
+			<form class="quick-open" on:submit|preventDefault={openJobById}>
+				<div>
+					<label for="job-id-input">Open job by ID</label>
+					<p class="meta">Paste a job id from anywhere in the feed to jump to the detail page</p>
+				</div>
+				<div class="quick-open__controls">
+					<input
+						id="job-id-input"
+						name="job-id"
+						autocomplete="off"
+						placeholder="e.g. abc123"
+						bind:value={jobLookupId}
+					/>
+					<button type="submit">Open</button>
+				</div>
+				{#if jobLookupError}
+					<p class="meta error">{jobLookupError}</p>
+				{/if}
+			</form>
 
 			<div class="section" id="status-manager">
 				<div class="section__header">
@@ -1501,6 +1538,33 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 		background: rgba(226, 232, 240, 0.08);
 		padding: 4px 8px;
 		border-radius: 6px;
+	}
+
+	.quick-open {
+		margin: 10px 0 6px;
+		padding: 12px 14px;
+		border: 1px solid rgba(226, 232, 240, 0.1);
+		border-radius: 12px;
+		background: rgba(255, 255, 255, 0.03);
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.quick-open__controls {
+		display: flex;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+
+	.quick-open input {
+		background: rgba(15, 23, 42, 0.7);
+		border: 1px solid rgba(226, 232, 240, 0.12);
+		border-radius: 10px;
+		padding: 8px 10px;
+		color: #e2e8f0;
+		min-width: 220px;
+		flex: 1;
 	}
 
 	h1 {
