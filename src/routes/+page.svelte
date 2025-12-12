@@ -55,8 +55,9 @@ import {
 	};
 
 const PAGE_SIZE = 20;
-const startOfToday = new Date();
-startOfToday.setHours(0, 0, 0, 0);
+const newJobThreshold = new Date();
+newJobThreshold.setHours(0, 0, 0, 0);
+newJobThreshold.setDate(newJobThreshold.getDate() - 2);
 const COMPANY_LOGOS_STORAGE_KEY = 'jobspy-company-logos';
 const jobInteractionsStorageKey = (id: string) => `jobspy-job-interactions-${id}`;
 const companyStatusStorageKey = (id: string) => `jobspy-company-statuses-${id}`;
@@ -73,8 +74,8 @@ const companyStatusStorageKey = (id: string) => `jobspy-company-statuses-${id}`;
 	let liveCursor: QueryDocumentSnapshot<DocumentData> | null = null;
 	let pastCursor: QueryDocumentSnapshot<DocumentData> | null = null;
 	let liveUnsubscribe: Unsubscribe | null = null;
-	let todayJobs: Job[] = [];
-	let olderJobs: Job[] = [];
+	let newJobs: Job[] = [];
+	let recentJobs: Job[] = [];
 	let pinnedJobs: Job[] = [];
 	let userId = '';
 	let jobInteractions: Record<string, JobInteraction> = {};
@@ -96,7 +97,7 @@ let authError = '';
 		{ href: '#status-manager', label: 'Company status' },
 		{ href: '#pinned', label: 'Pinned' },
 		{ href: '#new-jobs', label: 'New jobs' },
-		{ href: '#recent-jobs', label: 'Recent' }
+		{ href: '#recent-jobs', label: 'Recent jobs' }
 	];
 
 	const hydrateJobInteractionsFromStorage = () => {
@@ -224,11 +225,11 @@ let authError = '';
 		}
 	};
 
-	const refreshCompanyLogos = async (newJobs: Job[]) => {
+	const refreshCompanyLogos = async (jobsForLogos: Job[]) => {
 		const db = getDb();
 		if (!db) return;
 
-		const slugs = newJobs
+		const slugs = jobsForLogos
 			.map((job) => job.companySlug)
 			.filter((slug): slug is string => Boolean(slug));
 		const missingSlugs = Array.from(new Set(slugs.filter((slug) => !(slug in companyLogos))));
@@ -278,8 +279,8 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 
 	const isSubmitted = (job: Job) => Boolean(getInteraction(job.id).submitted);
 
-	const isToday = (job: Job) =>
-		job.date_posted ? job.date_posted.getTime() >= startOfToday.getTime() : false;
+	const isNewJob = (job: Job) =>
+		job.date_posted ? job.date_posted.getTime() >= newJobThreshold.getTime() : false;
 
 	const sortByDateDesc = (a: Job, b: Job) =>
 		(b.date_posted?.getTime() ?? 0) - (a.date_posted?.getTime() ?? 0);
@@ -295,8 +296,8 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 	const resetLiveFeedState = () => {
 		liveJobs = [];
 		pastJobs = [];
-		todayJobs = [];
-		olderJobs = [];
+		newJobs = [];
+		recentJobs = [];
 		pinnedJobs = [];
 		liveCursor = null;
 		pastCursor = null;
@@ -368,8 +369,8 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 		const visible = unique.filter((job) => !isHidden(job));
 		pinnedJobs = visible.filter(isPinnedLike).sort(sortByDateDesc);
 		const nonPinned = visible.filter((job) => !isPinnedLike(job));
-		todayJobs = nonPinned.filter(isToday).sort(sortByDateDesc);
-		olderJobs = nonPinned.filter((job) => !isToday(job)).sort(sortByDateDesc);
+		newJobs = nonPinned.filter(isNewJob).sort(sortByDateDesc);
+		recentJobs = nonPinned.filter((job) => !isNewJob(job)).sort(sortByDateDesc);
 	}
 
 	const startLiveSubscription = () => {
@@ -642,7 +643,7 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 <div class="page">
 	<header class="topbar">
 		<div class="logo">JobSpy</div>
-		<div class="subtitle">Today + history, auto-loads on scroll</div>
+		<div class="subtitle">Last 3 days + history, auto-loads on scroll</div>
 	</header>
 
 	<main class="content">
@@ -814,7 +815,7 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 			{:else if error}
 				<p class="meta error">{error}</p>
 			{:else}
-				{#if pinnedJobs.length === 0 && todayJobs.length === 0 && olderJobs.length === 0}
+				{#if pinnedJobs.length === 0 && newJobs.length === 0 && recentJobs.length === 0}
 					<p class="meta">No jobs found.</p>
 				{:else}
 					{#if pinnedJobs.length > 0}
@@ -983,13 +984,13 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 					<div class="section" id="new-jobs">
 						<div class="section__header">
 							<h2>New jobs</h2>
-							<p class="meta">Today</p>
+							<p class="meta">Last 3 days</p>
 						</div>
-						{#if todayJobs.length === 0}
+						{#if newJobs.length === 0}
 							<p class="meta">No new jobs yet.</p>
 						{:else}
 							<div class="list">
-								{#each todayJobs as job (job.id)}
+								{#each newJobs as job (job.id)}
 									<div class="card" data-hidden={isHidden(job)}>
 										<div class="card__grid">
 											<div class="card__content">
@@ -1150,17 +1151,17 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 					<div class="section" id="recent-jobs">
 						<div class="section__header">
 							<h2>Recent jobs</h2>
-							<p class="meta">Yesterday or earlier — scroll to load more</p>
+							<p class="meta">Older than 3 days — scroll to load more</p>
 						</div>
-						{#if olderJobs.length === 0}
+						{#if recentJobs.length === 0}
 							{#if hasMore}
 								<p class="meta">Scroll to load earlier jobs…</p>
 							{:else}
-								<p class="meta">No older jobs yet.</p>
+								<p class="meta">No recent jobs yet.</p>
 							{/if}
 						{:else}
 							<div class="list">
-								{#each olderJobs as job (job.id)}
+								{#each recentJobs as job (job.id)}
 									<div class="card" data-hidden={isHidden(job)}>
 										<div class="card__grid">
 											<div class="card__content">
@@ -1320,7 +1321,7 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 						{#if loadingMore}
 							<p class="meta">Loading more…</p>
 						{/if}
-						{#if !hasMore && (todayJobs.length > 0 || olderJobs.length > 0)}
+						{#if !hasMore && (newJobs.length > 0 || recentJobs.length > 0)}
 							<p class="meta">You reached the end.</p>
 						{/if}
 						<div class="sentinel" bind:this={sentinel} aria-hidden="true"></div>
