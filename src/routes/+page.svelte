@@ -4,11 +4,12 @@
 	import { onDestroy, onMount } from 'svelte';
 	import {
 		collection,
+		deleteField,
 		doc,
 		getDoc,
 		getDocs,
 		limit,
-	onSnapshot,
+		onSnapshot,
 	orderBy,
 	query,
 	setDoc,
@@ -44,6 +45,8 @@ import {
 		hidden?: boolean;
 		pinned?: boolean;
 		submitted?: boolean;
+		pinnedAt?: string;
+		submittedAt?: string;
 	};
 
 	type CompanyStatus = 'blacklist' | 'whitelist';
@@ -132,7 +135,7 @@ let activeTab: 'feed' | 'saved' = 'feed';
 			const cached = localStorage.getItem(jobInteractionsStorageKey(userId));
 			if (!cached) return;
 			const parsed = JSON.parse(cached) as Record<string, JobInteraction>;
-			jobInteractions = parsed;
+			jobInteractions = normalizeJobInteractions(parsed);
 		} catch (err) {
 			console.error('Failed to read cached job interactions', err);
 		}
@@ -191,6 +194,45 @@ let activeTab: 'feed' | 'saved' = 'feed';
 
 	const pickString = (...values: unknown[]) =>
 		values.find((value) => typeof value === 'string' && value.trim() !== '') as string | undefined;
+
+	const asOptionalBoolean = (value: unknown) => (typeof value === 'boolean' ? value : undefined);
+
+	const toDateString = (value: unknown) => {
+		if (!value) return undefined;
+		if (typeof value === 'string') return value;
+		if (
+			typeof value === 'object' &&
+			value !== null &&
+			'toDate' in value &&
+			typeof (value as { toDate?: unknown }).toDate === 'function'
+		) {
+			const date = (value as { toDate: () => Date }).toDate();
+			return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+		}
+		return undefined;
+	};
+
+	const normalizeJobInteraction = (
+		interaction?: Partial<JobInteraction> | Record<string, unknown>
+	): JobInteraction => {
+		if (!interaction) return {};
+		const pinnedAt = toDateString((interaction as JobInteraction).pinnedAt);
+		const submittedAt = toDateString((interaction as JobInteraction).submittedAt);
+		return {
+			hidden: asOptionalBoolean((interaction as JobInteraction).hidden),
+			pinned: asOptionalBoolean((interaction as JobInteraction).pinned),
+			submitted: asOptionalBoolean((interaction as JobInteraction).submitted),
+			...(pinnedAt ? { pinnedAt } : {}),
+			...(submittedAt ? { submittedAt } : {})
+		};
+	};
+
+	const normalizeJobInteractions = (
+		interactions: Record<string, JobInteraction | Record<string, unknown>>
+	): Record<string, JobInteraction> =>
+		Object.fromEntries(
+			Object.entries(interactions).map(([id, interaction]) => [id, normalizeJobInteraction(interaction)])
+		);
 
 	const mapJobData = (data: DocumentData, id: string): Job => ({
 		id,
@@ -356,7 +398,7 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 			(snapshot) => {
 				const next: Record<string, JobInteraction> = {};
 				snapshot.forEach((doc) => {
-					next[doc.id] = doc.data() as JobInteraction;
+					next[doc.id] = normalizeJobInteraction(doc.data() as JobInteraction);
 				});
 				jobInteractions = next;
 				persistJobInteractionsToStorage();
@@ -484,22 +526,47 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 		await fetchPastJobs();
 	};
 
-	const setJobInteraction = async (jobId: string, updates: Partial<JobInteraction>) => {
+	const setJobInteraction = async (
+		jobId: string,
+		updates: Partial<JobInteraction>,
+		firestoreUpdates?: Record<string, unknown>
+	) => {
 		if (!browser || !userId) return;
 		const db = getDb();
 		if (!db) return;
 
 		const current = getInteraction(jobId);
-		jobInteractions = { ...jobInteractions, [jobId]: { ...current, ...updates } };
+		const nextInteraction = normalizeJobInteraction({ ...current, ...updates });
+		jobInteractions = { ...jobInteractions, [jobId]: nextInteraction };
 		persistJobInteractionsToStorage();
 		void ensurePinnedJobsLoaded(jobInteractions);
 
-		await setDoc(doc(db, 'users', userId, 'job_interactions', jobId), updates, { merge: true });
+		await setDoc(
+			doc(db, 'users', userId, 'job_interactions', jobId),
+			firestoreUpdates ?? updates,
+			{ merge: true }
+		);
 	};
 
-	const toggleJobFlag = async (jobId: string, key: keyof JobInteraction) => {
-		const current = Boolean(getInteraction(jobId)[key]);
-		await setJobInteraction(jobId, { [key]: !current } as Partial<JobInteraction>);
+	const toggleJobFlag = async (jobId: string, key: 'hidden' | 'pinned' | 'submitted') => {
+		const currentInteraction = getInteraction(jobId);
+		const current = Boolean(currentInteraction[key]);
+		const nowIso = new Date().toISOString();
+
+		const updates: Partial<JobInteraction> = { [key]: !current };
+		const firestoreUpdates: Record<string, unknown> = { [key]: !current };
+
+		if (key === 'pinned') {
+			updates.pinnedAt = !current ? nowIso : undefined;
+			firestoreUpdates.pinnedAt = !current ? nowIso : deleteField();
+		}
+
+		if (key === 'submitted') {
+			updates.submittedAt = !current ? nowIso : undefined;
+			firestoreUpdates.submittedAt = !current ? nowIso : deleteField();
+		}
+
+		await setJobInteraction(jobId, updates, firestoreUpdates);
 	};
 
 	const setupObserver = () => {
@@ -589,10 +656,12 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 		observer?.disconnect();
 	});
 
-	const formatDate = (date?: Date) =>
-		date
-			? date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-			: 'Unknown';
+	const formatDate = (date?: Date | string) => {
+		if (!date) return 'Unknown';
+		const value = typeof date === 'string' ? new Date(date) : date;
+		if (Number.isNaN(value.getTime())) return 'Unknown';
+		return value.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+	};
 
 	const getCompanyMeta = (companyKey: string) => {
 		const jobs = [...liveJobs, ...pastJobs];
@@ -1301,6 +1370,16 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 														<span class="pill neutral subtle">Hidden</span>
 													{/if}
 												</div>
+												{#if getInteraction(job.id).pinnedAt || getInteraction(job.id).submittedAt}
+													<div class="saved-meta">
+														{#if getInteraction(job.id).pinnedAt}
+															<p class="meta">Pinned on {formatDate(getInteraction(job.id).pinnedAt)}</p>
+														{/if}
+														{#if getInteraction(job.id).submittedAt}
+															<p class="meta">Submitted on {formatDate(getInteraction(job.id).submittedAt)}</p>
+														{/if}
+													</div>
+												{/if}
 											</div>
 											<div class="card__side">
 												<div class="card__top-actions">
@@ -1827,6 +1906,17 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 		display: flex;
 		flex-wrap: wrap;
 		gap: 6px;
+	}
+
+	.saved-meta {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 12px;
+		margin-top: 6px;
+	}
+
+	.saved-meta .meta {
+		margin: 0;
 	}
 
 	.card__details {
