@@ -1,18 +1,30 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { collection, doc, getDoc, getDocs, limit, query, where } from 'firebase/firestore';
+	import {
+		collection,
+		deleteDoc,
+		doc,
+		getDoc,
+		getDocs,
+		limit,
+		query,
+		setDoc,
+		where
+	} from 'firebase/firestore';
 	import { getDb, onAuthChange } from '$lib/firebase';
 
 	export let params: { slug: string };
 
-type Company = {
-	name: string;
-	logo?: string;
-	website?: string;
-	description?: string;
-	employees?: string;
-	revenue?: string;
-};
+	type Company = {
+		name: string;
+		logo?: string;
+		website?: string;
+		description?: string;
+		employees?: string;
+		revenue?: string;
+	};
+
+	type CompanyStatus = 'blacklist' | 'whitelist';
 
 	type Job = {
 		id: string;
@@ -26,6 +38,10 @@ type Company = {
 	let loading = true;
 	let error = '';
 	let authReady = false;
+	let userId = '';
+	let companyStatus: CompanyStatus | undefined;
+	let statusError = '';
+	let statusSaving = false;
 
 	const decodedName = decodeURIComponent(params.slug);
 
@@ -36,6 +52,63 @@ type Company = {
 
 	const pickString = (...values: unknown[]) =>
 		values.find((value) => typeof value === 'string' && value.trim() !== '') as string | undefined;
+
+	const normalizeCompanyStatus = (value: unknown): CompanyStatus | undefined =>
+		value === 'blacklist' || value === 'whitelist' ? value : undefined;
+
+	const loadCompanyStatus = async () => {
+		statusError = '';
+		if (!userId) {
+			companyStatus = undefined;
+			return;
+		}
+
+		const db = getDb();
+		if (!db) return;
+
+		try {
+			const snap = await getDoc(doc(db, 'users', userId, 'company_status', params.slug));
+			companyStatus = snap.exists() ? normalizeCompanyStatus(snap.data()?.['status']) : undefined;
+		} catch (err) {
+			statusError = err instanceof Error ? err.message : 'Failed to load company status';
+		}
+	};
+
+	const setCompanyStatus = async (status?: CompanyStatus) => {
+		if (!userId) {
+			statusError = 'Sign in to manage this company';
+			return;
+		}
+
+		const db = getDb();
+		if (!db) {
+			statusError = 'Firestore not available';
+			return;
+		}
+
+		statusSaving = true;
+		statusError = '';
+		companyStatus = status;
+
+		const ref = doc(db, 'users', userId, 'company_status', params.slug);
+		try {
+			if (!status) {
+				await deleteDoc(ref);
+			} else {
+				await setDoc(ref, { status });
+			}
+		} catch (err) {
+			statusError = err instanceof Error ? err.message : 'Failed to update company status';
+			await loadCompanyStatus();
+		} finally {
+			statusSaving = false;
+		}
+	};
+
+	const toggleCompanyStatus = (status: CompanyStatus) => {
+		const nextStatus = companyStatus === status ? undefined : status;
+		void setCompanyStatus(nextStatus);
+	};
 
 	const loadCompany = async () => {
 		loading = true;
@@ -128,6 +201,9 @@ type Company = {
 		const stopAuth = onAuthChange(async (user) => {
 			authReady = true;
 			if (!user) {
+				userId = '';
+				companyStatus = undefined;
+				statusSaving = false;
 				company = null;
 				jobs = [];
 				error = 'Sign in to view this company';
@@ -143,9 +219,11 @@ type Company = {
 			}
 
 			error = '';
+			userId = user.uid;
 			if (!company) {
 				void loadCompany();
 			}
+			void loadCompanyStatus();
 		});
 
 		return () => stopAuth?.();
@@ -181,10 +259,36 @@ type Company = {
 						</div>
 					</div>
 
-					{#if company.website}
-						<a class="button" href={company.website} target="_blank" rel="noreferrer">Visit site</a>
-					{/if}
+					<div class="actions">
+						<div class="status-actions">
+							{#if company.website}
+								<a class="status-button visit" href={company.website} target="_blank" rel="noreferrer">
+									Visit site
+								</a>
+							{/if}
+							<button
+								class="status-button"
+								class:selected={companyStatus === 'whitelist'}
+								on:click={() => toggleCompanyStatus('whitelist')}
+								disabled={statusSaving}
+							>
+								{companyStatus === 'whitelist' ? 'Whitelisted' : 'Whitelist'}
+							</button>
+							<button
+								class="status-button danger"
+								class:selected={companyStatus === 'blacklist'}
+								on:click={() => toggleCompanyStatus('blacklist')}
+								disabled={statusSaving}
+							>
+								{companyStatus === 'blacklist' ? 'Blacklisted' : 'Blacklist'}
+							</button>
+						</div>
+					</div>
 				</header>
+
+				{#if statusError}
+					<p class="meta error status-error">Status: {statusError}</p>
+				{/if}
 
 				<section class="body">
 					{#if company.description}
@@ -394,6 +498,72 @@ type Company = {
 		box-shadow: 0 12px 28px rgba(0, 0, 0, 0.3);
 	}
 
+	.actions {
+		display: flex;
+		gap: 10px;
+		align-items: center;
+		margin-left: auto;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+	}
+
+	.status-actions {
+		display: flex;
+		gap: 8px;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+	}
+
+	.status-button {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 10px;
+		border: 1px solid rgba(226, 232, 240, 0.18);
+		background: rgba(255, 255, 255, 0.03);
+		color: #e2e8f0;
+		font-weight: 700;
+		padding: 8px 12px;
+		cursor: pointer;
+		transition: border-color 120ms ease, transform 120ms ease, background 120ms ease;
+		text-decoration: none;
+	}
+
+	.status-button:hover {
+		transform: translateY(-1px);
+		border-color: rgba(226, 232, 240, 0.32);
+	}
+
+	.status-button.selected {
+		background: rgba(34, 197, 94, 0.15);
+		border-color: rgba(34, 197, 94, 0.45);
+	}
+
+	.status-button.visit {
+		background: linear-gradient(135deg, rgba(37, 99, 235, 0.2), rgba(34, 197, 94, 0.2));
+		border-color: rgba(226, 232, 240, 0.24);
+		color: #e2e8f0;
+	}
+
+	.status-button.visit:hover {
+		border-color: rgba(226, 232, 240, 0.4);
+	}
+
+	.status-button.danger {
+		border-color: rgba(248, 113, 113, 0.35);
+		color: #fecdd3;
+	}
+
+	.status-button.danger.selected {
+		background: rgba(248, 113, 113, 0.14);
+		border-color: rgba(248, 113, 113, 0.6);
+	}
+
+	.status-button:disabled {
+		opacity: 0.7;
+		cursor: not-allowed;
+	}
+
 	.ghost {
 		color: #e2e8f0;
 		text-decoration: none;
@@ -530,6 +700,10 @@ type Company = {
 
 	.plain {
 		white-space: pre-line;
+		margin: 0;
+	}
+
+	.status-error {
 		margin: 0;
 	}
 </style>
