@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { marked } from 'marked';
-	import { doc, getDoc } from 'firebase/firestore';
+	import { deleteField, doc, getDoc, setDoc } from 'firebase/firestore';
 	import { getDb, onAuthChange } from '$lib/firebase';
 
 	export let params: { id: string };
@@ -22,11 +22,22 @@ type JobDetail = {
 	url?: string;
 };
 
+	type JobInteraction = {
+		pinned?: boolean;
+		submitted?: boolean;
+		pinnedAt?: string;
+		submittedAt?: string;
+	};
+
 	let job: JobDetail | null = null;
 	let loading = true;
 	let error = '';
 	let descriptionMarkup = '';
-	let authReady = false;
+	let userId = '';
+	let interaction: JobInteraction = {};
+	let interactionLoading = false;
+	let interactionError = '';
+	let savingInteraction = false;
 
 	const companyPath = (item: JobDetail | null) =>
 		item ? `/company/${encodeURIComponent(item.companySlug ?? item.company)}` : '#';
@@ -44,6 +55,33 @@ type JobDetail = {
 			if (typeof value === 'boolean') return value;
 		}
 		return undefined;
+	};
+
+	const toDateString = (value: unknown) => {
+		if (typeof value === 'string') return value;
+		if (
+			value &&
+			typeof value === 'object' &&
+			'toDate' in value &&
+			typeof (value as { toDate?: unknown }).toDate === 'function'
+		) {
+			const date = (value as { toDate: () => Date }).toDate();
+			return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+		}
+		return undefined;
+	};
+
+	const normalizeInteraction = (data?: Record<string, unknown>): JobInteraction => {
+		const pinnedValue = data?.['pinned'];
+		const submittedValue = data?.['submitted'];
+		const pinnedAt = toDateString(data?.['pinnedAt']);
+		const submittedAt = toDateString(data?.['submittedAt']);
+		return {
+			pinned: typeof pinnedValue === 'boolean' ? pinnedValue : undefined,
+			submitted: typeof submittedValue === 'boolean' ? submittedValue : undefined,
+			...(pinnedAt ? { pinnedAt } : {}),
+			...(submittedAt ? { submittedAt } : {})
+		};
 	};
 
 	const loadJob = async () => {
@@ -98,11 +136,78 @@ type JobDetail = {
 		}
 	};
 
+	const loadInteraction = async () => {
+		if (!userId) return;
+		interactionLoading = true;
+		interactionError = '';
+		const db = getDb();
+		if (!db) {
+			interactionLoading = false;
+			return;
+		}
+
+		try {
+			const snap = await getDoc(doc(db, 'users', userId, 'job_interactions', params.id));
+			interaction = snap.exists() ? normalizeInteraction(snap.data() as Record<string, unknown>) : {};
+		} catch (err) {
+			interactionError = err instanceof Error ? err.message : 'Failed to load job actions';
+		} finally {
+			interactionLoading = false;
+		}
+	};
+
+	const toggleJobFlag = async (key: 'pinned' | 'submitted') => {
+		if (!userId) {
+			interactionError = 'Sign in to save job actions';
+			return;
+		}
+
+		const db = getDb();
+		if (!db) {
+			interactionError = 'Firestore not available';
+			return;
+		}
+
+		const current = Boolean(interaction[key]);
+		const nowIso = new Date().toISOString();
+		const updates: Partial<JobInteraction> = { [key]: !current };
+		const firestoreUpdates: Record<string, unknown> = { [key]: !current };
+
+		if (key === 'pinned') {
+			updates.pinnedAt = !current ? nowIso : undefined;
+			firestoreUpdates.pinnedAt = !current ? nowIso : deleteField();
+		}
+
+		if (key === 'submitted') {
+			updates.submittedAt = !current ? nowIso : undefined;
+			firestoreUpdates.submittedAt = !current ? nowIso : deleteField();
+		}
+
+		interaction = normalizeInteraction({ ...interaction, ...updates });
+		interactionError = '';
+		savingInteraction = true;
+
+		try {
+			await setDoc(doc(db, 'users', userId, 'job_interactions', params.id), firestoreUpdates, {
+				merge: true
+			});
+		} catch (err) {
+			interactionError = err instanceof Error ? err.message : 'Failed to save job action';
+			void loadInteraction();
+		} finally {
+			savingInteraction = false;
+		}
+	};
+
 	onMount(() => {
 		const stopAuth = onAuthChange(async (user) => {
-			authReady = true;
+			userId = user?.uid ?? '';
 			if (!user) {
 				job = null;
+				interaction = {};
+				interactionError = '';
+				interactionLoading = false;
+				savingInteraction = false;
 				error = 'Sign in to view this job';
 				loading = false;
 				return;
@@ -118,6 +223,7 @@ type JobDetail = {
 			if (!job) {
 				void loadJob();
 			}
+			void loadInteraction();
 		});
 
 		return () => stopAuth?.();
@@ -178,13 +284,71 @@ type JobDetail = {
 								{/if}
 							</div>
 						{/if}
+						{#if interaction.pinned || interaction.submitted}
+							<div class="meta-row">
+								{#if interaction.pinned}
+									<span class="pill accent">Pinned</span>
+								{/if}
+								{#if interaction.submitted}
+									<span class="pill success">Submitted</span>
+								{/if}
+							</div>
+						{/if}
+						{#if interactionError}
+							<p class="meta error">{interactionError}</p>
+						{/if}
 					</div>
-					{#if job.url}
-						<a class="cta" href={job.url} target="_blank" rel="noreferrer">
-							<span>View / Apply</span>
-							<span class="cta__icon" aria-hidden="true">↗</span>
-						</a>
-					{/if}
+					<div class="actions">
+						<div class="action-rail" aria-label="Job actions">
+							{#if job.url}
+								<a class="action-chip primary" href={job.url} target="_blank" rel="noreferrer">
+									<svg viewBox="0 0 24 24" aria-hidden="true">
+										<path
+											d="M13 3a1 1 0 1 0 0 2h3.586l-6.293 6.293a1 1 0 0 0 1.414 1.414L18 6.414V10a1 1 0 1 0 2 0V4a1 1 0 0 0-1-1h-6Z"
+											fill="currentColor"
+										/>
+										<path
+											d="M5 5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3a1 1 0 1 0-2 0v3H5V7h3a1 1 0 1 0 0-2H5Z"
+											fill="currentColor"
+										/>
+									</svg>
+									<span>View / Apply</span>
+								</a>
+							{/if}
+							<button
+								class="action-chip"
+								class:active={interaction.pinned}
+								on:click={() => toggleJobFlag('pinned')}
+								disabled={savingInteraction || interactionLoading}
+								aria-pressed={interaction.pinned ? 'true' : 'false'}
+								title={interaction.pinned ? 'Unpin this job' : 'Pin this job'}
+							>
+								<svg viewBox="0 0 24 24" aria-hidden="true">
+									<path
+										d="M6 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16l-7-3-7 3V4Z"
+										fill="currentColor"
+									/>
+								</svg>
+								<span>{interaction.pinned ? 'Pinned' : 'Pin job'}</span>
+							</button>
+							<button
+								class="action-chip"
+								class:active={interaction.submitted}
+								on:click={() => toggleJobFlag('submitted')}
+								disabled={savingInteraction || interactionLoading}
+								aria-pressed={interaction.submitted ? 'true' : 'false'}
+								title={interaction.submitted ? 'Undo submitted' : 'Mark submitted'}
+							>
+								<svg viewBox="0 0 24 24" aria-hidden="true">
+									<path
+										d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm-1 14-4-4 1.4-1.4L11 13.2l5.6-5.6L18 9l-7 7Z"
+										fill="currentColor"
+									/>
+								</svg>
+								<span>{interaction.submitted ? 'Submitted' : 'Mark submitted'}</span>
+							</button>
+						</div>
+					</div>
 				</header>
 
 				<section class="body">
@@ -259,8 +423,86 @@ type JobDetail = {
 	.panel__header {
 		display: flex;
 		justify-content: space-between;
-		gap: 12px;
+		gap: 16px;
 		flex-wrap: wrap;
+		align-items: flex-start;
+	}
+
+	.actions {
+		display: grid;
+		grid-template-columns: auto;
+		gap: 12px;
+		justify-items: end;
+		min-width: 240px;
+	}
+
+	.action-rail {
+		display: flex;
+		gap: 10px;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+	}
+
+	.action-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		padding: 8px 12px;
+		border-radius: 12px;
+		border: 1px solid rgba(226, 232, 240, 0.18);
+		background: rgba(15, 23, 42, 0.7);
+		color: #e2e8f0;
+		cursor: pointer;
+		font-weight: 700;
+		transition: border-color 120ms ease, transform 120ms ease, background-color 120ms ease;
+	}
+
+	.action-chip svg {
+		width: 18px;
+		height: 18px;
+	}
+
+	.action-chip:hover:not(:disabled) {
+		border-color: rgba(148, 163, 184, 0.6);
+		transform: translateY(-1px);
+	}
+
+	.action-chip.active {
+		background: linear-gradient(135deg, rgba(59, 130, 246, 0.25), rgba(16, 185, 129, 0.25));
+		border-color: rgba(59, 130, 246, 0.65);
+	}
+
+	.action-chip:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
+	.action-chip.primary {
+		background: linear-gradient(135deg, rgba(59, 130, 246, 0.3), rgba(14, 165, 233, 0.3));
+		border-color: rgba(96, 165, 250, 0.65);
+		box-shadow: 0 8px 18px rgba(14, 165, 233, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+	}
+
+	@media (max-width: 640px) {
+		.panel__header {
+			align-items: stretch;
+		}
+
+		.actions {
+			grid-template-columns: 1fr;
+			justify-items: stretch;
+			min-width: unset;
+			width: 100%;
+		}
+
+		.action-rail {
+			justify-content: stretch;
+		}
+
+		.action-chip {
+			flex: 1 1 calc(50% - 10px);
+			justify-content: center;
+		}
 	}
 
 	h1 {
