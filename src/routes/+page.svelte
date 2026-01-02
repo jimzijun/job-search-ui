@@ -63,25 +63,25 @@ const COMPANY_LOGOS_STORAGE_KEY = 'jobspy-company-logos';
 const jobInteractionsStorageKey = (id: string) => `jobspy-job-interactions-${id}`;
 const companyStatusStorageKey = (id: string) => `jobspy-company-statuses-${id}`;
 
-	let liveJobs: Job[] = [];
-	let pastJobs: Job[] = [];
-	let companyLogos: Record<string, string | undefined> = {};
-	let loading = true; // initial live feed load
-	let loadingMore = false; // pagination fetch state
-	let hasMore = false; // whether older pages likely exist
-	let error = '';
-	let sentinel: HTMLDivElement | null = null;
-	let observer: IntersectionObserver | null = null;
-	let liveCursor: QueryDocumentSnapshot<DocumentData> | null = null;
-	let pastCursor: QueryDocumentSnapshot<DocumentData> | null = null;
-	let liveUnsubscribe: Unsubscribe | null = null;
-	let newJobs: Job[] = [];
-	let recentJobs: Job[] = [];
-	let pinnedJobs: Job[] = [];
-	let userId = '';
-	let jobInteractions: Record<string, JobInteraction> = {};
-	let companyStatuses: Record<string, CompanyStatus | undefined> = {};
-	let jobInteractionsUnsubscribe: Unsubscribe | null = null;
+let liveJobs: Job[] = [];
+let pastJobs: Job[] = [];
+let companyLogos: Record<string, string | undefined> = {};
+let loading = true; // initial live feed load
+let loadingMore = false; // pagination fetch state
+let hasMore = false; // whether older pages likely exist
+let error = '';
+let sentinel: HTMLDivElement | null = null;
+let observer: IntersectionObserver | null = null;
+let liveCursor: QueryDocumentSnapshot<DocumentData> | null = null;
+let pastCursor: QueryDocumentSnapshot<DocumentData> | null = null;
+let liveUnsubscribe: Unsubscribe | null = null;
+let newJobs: Job[] = [];
+let recentJobs: Job[] = [];
+let pinnedJobs: Job[] = [];
+let userId = '';
+let jobInteractions: Record<string, JobInteraction> = {};
+let companyStatuses: Record<string, CompanyStatus | undefined> = {};
+let jobInteractionsUnsubscribe: Unsubscribe | null = null;
 let companyStatusUnsubscribe: Unsubscribe | null = null;
 let lastUserSubscriptionId: string | null = null;
 let companyStatusEntries: CompanyStatusEntry[] = [];
@@ -95,13 +95,22 @@ let authReady = false;
 let authError = '';
 let jobLookupId = '';
 let jobLookupError = '';
+let activeTab: 'feed' | 'saved' = 'feed';
 
-	const navLinks = [
+	const feedNavLinks = [
 		{ href: '#status-manager', label: 'Company status' },
-		{ href: '#pinned', label: 'Pinned' },
 		{ href: '#new-jobs', label: 'New jobs' },
 		{ href: '#recent-jobs', label: 'Recent jobs' }
 	];
+
+	const savedNavLinks = [
+		{ href: '#status-manager', label: 'Company status' },
+		{ href: '#saved', label: 'Saved jobs' }
+	];
+
+	let navLinks = feedNavLinks;
+
+	$: navLinks = activeTab === 'feed' ? feedNavLinks : savedNavLinks;
 
 	const openJobById = () => {
 		const trimmed = jobLookupId.trim();
@@ -568,6 +577,10 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 	});
 
 	$: if (sentinel) setupObserver();
+	$: if (!sentinel && observer) {
+		observer.disconnect();
+		observer = null;
+	}
 
 	onDestroy(() => {
 		if (liveUnsubscribe) liveUnsubscribe();
@@ -688,8 +701,29 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 				{/if}
 				<div class="panel__header">
 					<h1>Job Feed</h1>
-					<p class="meta">Pinned first, then most recent</p>
+					<p class="meta">New + recent feed here; saved items live in the Saved tab</p>
 				</div>
+
+			<div class="tab-switch" role="tablist" aria-label="Job feed tabs">
+				<button
+					role="tab"
+					aria-selected={activeTab === 'feed'}
+					class:selected={activeTab === 'feed'}
+					on:click={() => (activeTab = 'feed')}
+				>
+					<div class="tab-switch__title">Feed</div>
+					<p class="meta">New and recent jobs</p>
+				</button>
+				<button
+					role="tab"
+					aria-selected={activeTab === 'saved'}
+					class:selected={activeTab === 'saved'}
+					on:click={() => (activeTab = 'saved')}
+				>
+					<div class="tab-switch__title">Saved</div>
+					<p class="meta">Pinned or submitted</p>
+				</button>
+			</div>
 
 			<div class="user-control">
 				<label>Active user</label>
@@ -851,173 +885,10 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 				</div>
 			{:else if error}
 				<p class="meta error">{error}</p>
+			{:else if pinnedJobs.length === 0 && newJobs.length === 0 && recentJobs.length === 0}
+				<p class="meta">No jobs found.</p>
 			{:else}
-				{#if pinnedJobs.length === 0 && newJobs.length === 0 && recentJobs.length === 0}
-					<p class="meta">No jobs found.</p>
-				{:else}
-					{#if pinnedJobs.length > 0}
-						<div class="section" id="pinned">
-							<div class="section__header">
-								<h2>Pinned</h2>
-								<p class="meta">Pinned by you, sorted by most recent</p>
-							</div>
-							<div class="list">
-								{#each pinnedJobs as job (job.id)}
-									<div class="card" data-hidden={isHidden(job)}>
-										<div class="card__grid">
-											<div class="card__content">
-												<div class="card__top">
-													<a class="title-link" href={jobPath(job)}>{job.title}</a>
-												</div>
-												<div class="card__meta">
-													<a class="company-chip" href={companyPath(job)}>
-													{#if getCompanyLogo(job, companyLogos)}
-															<img
-																class="company-chip__logo"
-																src={getCompanyLogo(job, companyLogos)}
-																alt={`${job.company} logo`}
-																loading="lazy"
-															/>
-														{:else}
-															<div class="company-chip__fallback">{job.company.slice(0, 1)}</div>
-														{/if}
-														<span class="company-chip__name">{job.company}</span>
-													</a>
-													{#if job.location}
-														<span class="pill neutral">{job.location}</span>
-													{/if}
-												</div>
-												{#if job.job_type || job.experience_range || job.salary || job.has_python_keyword !== undefined}
-													<div class="card__details">
-														{#if job.job_type}
-															<span class="pill neutral">{job.job_type}</span>
-														{/if}
-														{#if job.experience_range}
-															<span class="pill neutral">Exp: {job.experience_range}</span>
-														{/if}
-														{#if job.salary}
-															<span class="pill accent">Salary {job.salary}</span>
-														{/if}
-														{#if job.has_python_keyword === true}
-															<span class="pill success">Python keyword</span>
-														{:else if job.has_python_keyword === false}
-															<span class="pill neutral subtle">No Python keyword</span>
-														{/if}
-													</div>
-												{/if}
-												<div class="card__labels">
-													<span class="pill accent">Pinned</span>
-													{#if isSubmitted(job)}
-														<span class="pill success">Submitted</span>
-													{/if}
-													{#if getCompanyStatus(job) === 'whitelist'}
-														<span class="pill success subtle">Preferred company</span>
-													{:else if getCompanyStatus(job) === 'blacklist'}
-														<span class="pill danger subtle">Blacklisted</span>
-													{/if}
-													{#if isJobHidden(job)}
-														<span class="pill neutral subtle">Hidden</span>
-													{/if}
-												</div>
-											</div>
-											<div class="card__side">
-												<div class="card__top-actions">
-													<a
-														class="direct-link"
-														href={job.url ?? jobPath(job)}
-														target={job.url ? '_blank' : undefined}
-														rel={job.url ? 'noreferrer' : undefined}
-													>
-														{job.url ? 'Job link' : 'View details'}
-													</a>
-													<div class="date">{formatDate(job.date_posted)}</div>
-												</div>
-												<div class="card__action-rail" aria-label="Job and company actions">
-													<button
-														class="icon-button"
-														class:selected={isPinned(job)}
-														on:click={() => toggleJobFlag(job.id, 'pinned')}
-														title={isPinned(job) ? 'Unpin' : 'Pin'}
-														aria-label={isPinned(job) ? 'Unpin job' : 'Pin job'}
-													>
-														<svg viewBox="0 0 24 24" aria-hidden="true">
-															<path
-																d="M6 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16l-7-3-7 3V4Z"
-																fill="currentColor"
-															/>
-														</svg>
-														<span class="sr-only">{isPinned(job) ? 'Unpin' : 'Pin'}</span>
-													</button>
-													<button
-														class="icon-button"
-														class:selected={isSubmitted(job)}
-														on:click={() => toggleJobFlag(job.id, 'submitted')}
-														title={isSubmitted(job) ? 'Undo submitted' : 'Mark submitted'}
-														aria-label={isSubmitted(job) ? 'Undo submitted' : 'Mark submitted'}
-													>
-														<svg viewBox="0 0 24 24" aria-hidden="true">
-															<path
-																d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm-1 14-4-4 1.4-1.4L11 13.2l5.6-5.6L18 9l-7 7Z"
-																fill="currentColor"
-															/>
-														</svg>
-														<span class="sr-only">
-															{isSubmitted(job) ? 'Undo submitted' : 'Mark submitted'}
-														</span>
-													</button>
-													<button
-														class="icon-button ghost"
-														on:click={() => toggleJobFlag(job.id, 'hidden')}
-														title={isJobHidden(job) ? 'Unhide' : 'Hide'}
-														aria-label={isJobHidden(job) ? 'Unhide job' : 'Hide job'}
-													>
-														<svg viewBox="0 0 24 24" aria-hidden="true">
-															<path
-																d="M12 5c-4.8 0-8.8 3-10 7 1.2 4 5.2 7 10 7s8.8-3 10-7c-1.2-4-5.2-7-10-7Zm0 12a5 5 0 1 1 0-10 5 5 0 0 1 0 10Zm0-3a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"
-																fill="currentColor"
-															/>
-														</svg>
-														<span class="sr-only">{isJobHidden(job) ? 'Unhide' : 'Hide'}</span>
-													</button>
-													<button
-														class="icon-button"
-														class:selected={getCompanyStatus(job) === 'whitelist'}
-														on:click={() => setCompanyStatusForJob(job, 'whitelist')}
-														title="Whitelist company"
-														aria-label="Whitelist company"
-													>
-														<svg viewBox="0 0 24 24" aria-hidden="true">
-															<path
-																d="M12 3 4 6v5c0 4 2.7 7.6 8 9 5.3-1.4 8-5 8-9V6l-8-3Zm-1 11-2.5-2.5 1.4-1.4L11 11.2l3.6-3.6 1.4 1.4L11 14Z"
-																fill="currentColor"
-															/>
-														</svg>
-														<span class="sr-only">Whitelist company</span>
-													</button>
-													<button
-														class="icon-button danger"
-														class:selected={getCompanyStatus(job) === 'blacklist'}
-														on:click={() => setCompanyStatusForJob(job, 'blacklist')}
-														title="Blacklist company"
-														aria-label="Blacklist company"
-													>
-														<svg viewBox="0 0 24 24" aria-hidden="true">
-															<path
-																d="M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16Zm-6 8a6 6 0 0 1 1.1-3.4L15.4 17A6 6 0 0 1 6 12Zm6 6a6 6 0 0 1-3.4-1.1L16 9.4A6 6 0 0 1 12 18Z"
-																fill="currentColor"
-															/>
-														</svg>
-														<span class="sr-only">Blacklist company</span>
-													</button>
-												</div>
-											</div>
-										</div>
-									</div>
-								{/each}
-							</div>
-						</div>
-					{/if}
-
+				{#if activeTab === 'feed'}
 					<div class="section" id="new-jobs">
 						<div class="section__header">
 							<h2>New jobs</h2>
@@ -1363,6 +1234,171 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 						{/if}
 						<div class="sentinel" bind:this={sentinel} aria-hidden="true"></div>
 					</div>
+				{:else}
+					<div class="section" id="saved">
+						<div class="section__header">
+							<h2>Saved jobs</h2>
+							<p class="meta">Pinned or marked submitted</p>
+						</div>
+						{#if pinnedJobs.length === 0}
+							<p class="meta">No saved jobs yet. Pin or mark submitted from the feed.</p>
+						{:else}
+							<div class="list">
+								{#each pinnedJobs as job (job.id)}
+									<div class="card" data-hidden={isHidden(job)}>
+										<div class="card__grid">
+											<div class="card__content">
+												<div class="card__top">
+													<a class="title-link" href={jobPath(job)}>{job.title}</a>
+												</div>
+												<div class="card__meta">
+													<a class="company-chip" href={companyPath(job)}>
+													{#if getCompanyLogo(job, companyLogos)}
+															<img
+																class="company-chip__logo"
+																src={getCompanyLogo(job, companyLogos)}
+																alt={`${job.company} logo`}
+																loading="lazy"
+															/>
+														{:else}
+															<div class="company-chip__fallback">{job.company.slice(0, 1)}</div>
+														{/if}
+														<span class="company-chip__name">{job.company}</span>
+													</a>
+													{#if job.location}
+														<span class="pill neutral">{job.location}</span>
+													{/if}
+												</div>
+												{#if job.job_type || job.experience_range || job.salary || job.has_python_keyword !== undefined}
+													<div class="card__details">
+														{#if job.job_type}
+															<span class="pill neutral">{job.job_type}</span>
+														{/if}
+														{#if job.experience_range}
+															<span class="pill neutral">Exp: {job.experience_range}</span>
+														{/if}
+														{#if job.salary}
+															<span class="pill accent">Salary {job.salary}</span>
+														{/if}
+														{#if job.has_python_keyword === true}
+															<span class="pill success">Python keyword</span>
+														{:else if job.has_python_keyword === false}
+															<span class="pill neutral subtle">No Python keyword</span>
+														{/if}
+													</div>
+												{/if}
+												<div class="card__labels">
+													<span class="pill accent">Pinned</span>
+													{#if isSubmitted(job)}
+														<span class="pill success">Submitted</span>
+													{/if}
+													{#if getCompanyStatus(job) === 'whitelist'}
+														<span class="pill success subtle">Preferred company</span>
+													{:else if getCompanyStatus(job) === 'blacklist'}
+														<span class="pill danger subtle">Blacklisted</span>
+													{/if}
+													{#if isJobHidden(job)}
+														<span class="pill neutral subtle">Hidden</span>
+													{/if}
+												</div>
+											</div>
+											<div class="card__side">
+												<div class="card__top-actions">
+													<a
+														class="direct-link"
+														href={job.url ?? jobPath(job)}
+														target={job.url ? '_blank' : undefined}
+														rel={job.url ? 'noreferrer' : undefined}
+													>
+														{job.url ? 'Job link' : 'View details'}
+													</a>
+													<div class="date">{formatDate(job.date_posted)}</div>
+												</div>
+												<div class="card__action-rail" aria-label="Job and company actions">
+													<button
+														class="icon-button"
+														class:selected={isPinned(job)}
+														on:click={() => toggleJobFlag(job.id, 'pinned')}
+														title={isPinned(job) ? 'Unpin' : 'Pin'}
+														aria-label={isPinned(job) ? 'Unpin job' : 'Pin job'}
+													>
+														<svg viewBox="0 0 24 24" aria-hidden="true">
+															<path
+																d="M6 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16l-7-3-7 3V4Z"
+																fill="currentColor"
+															/>
+														</svg>
+														<span class="sr-only">{isPinned(job) ? 'Unpin' : 'Pin'}</span>
+													</button>
+													<button
+														class="icon-button"
+														class:selected={isSubmitted(job)}
+														on:click={() => toggleJobFlag(job.id, 'submitted')}
+														title={isSubmitted(job) ? 'Undo submitted' : 'Mark submitted'}
+														aria-label={isSubmitted(job) ? 'Undo submitted' : 'Mark submitted'}
+													>
+														<svg viewBox="0 0 24 24" aria-hidden="true">
+															<path
+																d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm-1 14-4-4 1.4-1.4L11 13.2l5.6-5.6L18 9l-7 7Z"
+																fill="currentColor"
+															/>
+														</svg>
+														<span class="sr-only">
+															{isSubmitted(job) ? 'Undo submitted' : 'Mark submitted'}
+														</span>
+													</button>
+													<button
+														class="icon-button ghost"
+														on:click={() => toggleJobFlag(job.id, 'hidden')}
+														title={isJobHidden(job) ? 'Unhide' : 'Hide'}
+														aria-label={isJobHidden(job) ? 'Unhide job' : 'Hide job'}
+													>
+														<svg viewBox="0 0 24 24" aria-hidden="true">
+															<path
+																d="M12 5c-4.8 0-8.8 3-10 7 1.2 4 5.2 7 10 7s8.8-3 10-7c-1.2-4-5.2-7-10-7Zm0 12a5 5 0 1 1 0-10 5 5 0 0 1 0 10Zm0-3a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"
+																fill="currentColor"
+															/>
+														</svg>
+														<span class="sr-only">{isJobHidden(job) ? 'Unhide' : 'Hide'}</span>
+													</button>
+													<button
+														class="icon-button"
+														class:selected={getCompanyStatus(job) === 'whitelist'}
+														on:click={() => setCompanyStatusForJob(job, 'whitelist')}
+														title="Whitelist company"
+														aria-label="Whitelist company"
+													>
+														<svg viewBox="0 0 24 24" aria-hidden="true">
+															<path
+																d="M12 3 4 6v5c0 4 2.7 7.6 8 9 5.3-1.4 8-5 8-9V6l-8-3Zm-1 11-2.5-2.5 1.4-1.4L11 11.2l3.6-3.6 1.4 1.4L11 14Z"
+																fill="currentColor"
+															/>
+														</svg>
+														<span class="sr-only">Whitelist company</span>
+													</button>
+													<button
+														class="icon-button danger"
+														class:selected={getCompanyStatus(job) === 'blacklist'}
+														on:click={() => setCompanyStatusForJob(job, 'blacklist')}
+														title="Blacklist company"
+														aria-label="Blacklist company"
+													>
+														<svg viewBox="0 0 24 24" aria-hidden="true">
+															<path
+																d="M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16Zm-6 8a6 6 0 0 1 1.1-3.4L15.4 17A6 6 0 0 1 6 12Zm6 6a6 6 0 0 1-3.4-1.1L16 9.4A6 6 0 0 1 12 18Z"
+																fill="currentColor"
+															/>
+														</svg>
+														<span class="sr-only">Blacklist company</span>
+													</button>
+												</div>
+											</div>
+										</div>
+									</div>
+								{/each}
+							</div>
+						{/if}
+					</div>
 				{/if}
 			{/if}
 			</section>
@@ -1507,6 +1543,25 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 		align-items: center;
 		justify-content: space-between;
 		gap: 12px;
+	}
+
+	.tab-switch {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+		gap: 10px;
+		margin: 14px 0 8px;
+	}
+
+	.tab-switch button {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		justify-content: center;
+		gap: 4px;
+	}
+
+	.tab-switch__title {
+		font-weight: 700;
 	}
 
 	.user-control {
