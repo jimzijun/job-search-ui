@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { collection, doc, getDoc, getDocs, limit, query, where } from 'firebase/firestore';
-	import { getDb } from '$lib/firebase';
+	import { getDb, onAuthChange } from '$lib/firebase';
 
 	export let params: { slug: string };
 
@@ -25,6 +25,7 @@ type Company = {
 	let jobs: Job[] = [];
 	let loading = true;
 	let error = '';
+	let authReady = false;
 
 	const decodedName = decodeURIComponent(params.slug);
 
@@ -36,7 +37,9 @@ type Company = {
 	const pickString = (...values: unknown[]) =>
 		values.find((value) => typeof value === 'string' && value.trim() !== '') as string | undefined;
 
-	onMount(async () => {
+	const loadCompany = async () => {
+		loading = true;
+		error = '';
 		const db = getDb();
 		if (!db) {
 			error = 'Firestore not available';
@@ -119,6 +122,33 @@ type Company = {
 		} finally {
 			loading = false;
 		}
+	};
+
+	onMount(() => {
+		const stopAuth = onAuthChange(async (user) => {
+			authReady = true;
+			if (!user) {
+				company = null;
+				jobs = [];
+				error = 'Sign in to view this company';
+				loading = false;
+				return;
+			}
+
+			try {
+				// Ensure token is fresh before Firestore reads to avoid permission-denied after refresh
+				await user.getIdToken();
+			} catch (tokenErr) {
+				console.error('Failed to refresh auth token', tokenErr);
+			}
+
+			error = '';
+			if (!company) {
+				void loadCompany();
+			}
+		});
+
+		return () => stopAuth?.();
 	});
 </script>
 

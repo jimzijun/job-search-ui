@@ -273,8 +273,8 @@ let jobLookupError = '';
 		}
 	};
 
-	const getCompanyLogo = (job: Job) =>
-		job.companySlug ? companyLogos[job.companySlug] : undefined;
+	const getCompanyLogo = (job: Job, logos: Record<string, string | undefined>) =>
+		job.companySlug ? logos[job.companySlug] : undefined;
 
 	const getCompanyKey = (job: Job) => job.companySlug ?? job.company.toLowerCase();
 
@@ -585,7 +585,7 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 		const jobs = [...liveJobs, ...pastJobs];
 		const match = jobs.find((job) => getCompanyKey(job) === companyKey);
 		const name = match?.company ?? companyKey;
-		const logo = match ? getCompanyLogo(match) : companyLogos[companyKey];
+		const logo = match ? getCompanyLogo(match, companyLogos) : companyLogos[companyKey];
 		const jobCount = jobs.filter((job) => getCompanyKey(job) === companyKey).length;
 		return { name, logo, jobCount };
 	};
@@ -871,10 +871,10 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 												</div>
 												<div class="card__meta">
 													<a class="company-chip" href={companyPath(job)}>
-														{#if getCompanyLogo(job)}
+													{#if getCompanyLogo(job, companyLogos)}
 															<img
 																class="company-chip__logo"
-																src={getCompanyLogo(job)}
+																src={getCompanyLogo(job, companyLogos)}
 																alt={`${job.company} logo`}
 																loading="lazy"
 															/>
@@ -1036,10 +1036,10 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 												</div>
 												<div class="card__meta">
 													<a class="company-chip" href={companyPath(job)}>
-														{#if getCompanyLogo(job)}
+														{#if getCompanyLogo(job, companyLogos)}
 															<img
 																class="company-chip__logo"
-																src={getCompanyLogo(job)}
+																src={getCompanyLogo(job, companyLogos)}
 																alt={`${job.company} logo`}
 																loading="lazy"
 															/>
@@ -1207,10 +1207,10 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 												</div>
 												<div class="card__meta">
 													<a class="company-chip" href={companyPath(job)}>
-														{#if getCompanyLogo(job)}
+														{#if getCompanyLogo(job, companyLogos)}
 															<img
 																class="company-chip__logo"
-																src={getCompanyLogo(job)}
+																src={getCompanyLogo(job, companyLogos)}
 																alt={`${job.company} logo`}
 																loading="lazy"
 															/>

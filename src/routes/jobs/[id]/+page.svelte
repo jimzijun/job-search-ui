@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { marked } from 'marked';
 	import { doc, getDoc } from 'firebase/firestore';
-	import { getDb } from '$lib/firebase';
+	import { getDb, onAuthChange } from '$lib/firebase';
 
 	export let params: { id: string };
 
@@ -26,6 +26,7 @@ type JobDetail = {
 	let loading = true;
 	let error = '';
 	let descriptionMarkup = '';
+	let authReady = false;
 
 	const companyPath = (item: JobDetail | null) =>
 		item ? `/company/${encodeURIComponent(item.companySlug ?? item.company)}` : '#';
@@ -45,7 +46,9 @@ type JobDetail = {
 		return undefined;
 	};
 
-	onMount(async () => {
+	const loadJob = async () => {
+		loading = true;
+		error = '';
 		const db = getDb();
 		if (!db) {
 			error = 'Firestore not available';
@@ -93,6 +96,31 @@ type JobDetail = {
 		} finally {
 			loading = false;
 		}
+	};
+
+	onMount(() => {
+		const stopAuth = onAuthChange(async (user) => {
+			authReady = true;
+			if (!user) {
+				job = null;
+				error = 'Sign in to view this job';
+				loading = false;
+				return;
+			}
+			// Ensure the ID token is ready before reading Firestore to avoid permission errors on refresh
+			try {
+				await user.getIdToken();
+			} catch (tokenErr) {
+				console.error('Failed to refresh auth token', tokenErr);
+			}
+			error = '';
+			// When auth is established, fetch the job if not already loaded
+			if (!job) {
+				void loadJob();
+			}
+		});
+
+		return () => stopAuth?.();
 	});
 
 	const renderMarkdown = (content: string) =>
