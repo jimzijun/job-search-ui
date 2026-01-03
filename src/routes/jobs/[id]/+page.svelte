@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { marked } from 'marked';
-	import { deleteField, doc, getDoc, setDoc } from 'firebase/firestore';
+	import { deleteDoc, deleteField, doc, getDoc, setDoc } from 'firebase/firestore';
 	import { getDb, onAuthChange } from '$lib/firebase';
-	import { JobMetaPills } from '$lib';
+	import { CompanyStatusGroup, JobActionGroup, JobMetaPills } from '$lib';
 
 	export let params: { id: string };
 
@@ -24,11 +24,14 @@ type JobDetail = {
 };
 
 	type JobInteraction = {
+		hidden?: boolean;
 		pinned?: boolean;
 		submitted?: boolean;
 		pinnedAt?: string;
 		submittedAt?: string;
 	};
+
+	type CompanyStatus = 'blacklist' | 'whitelist';
 
 	let job: JobDetail | null = null;
 	let loading = true;
@@ -39,9 +42,14 @@ type JobDetail = {
 	let interactionLoading = false;
 	let interactionError = '';
 	let savingInteraction = false;
+	let companyStatus: CompanyStatus | undefined;
+	let statusError = '';
+	let statusSaving = false;
 
 	const companyPath = (item: JobDetail | null) =>
 		item ? `/company/${encodeURIComponent(item.companySlug ?? item.company)}` : '#';
+	const companyKey = (item: JobDetail | null) =>
+		item?.companySlug ?? item?.company?.toLowerCase() ?? params.id;
 
 	const formatDate = (date?: Date) =>
 		date
@@ -75,9 +83,11 @@ type JobDetail = {
 	const normalizeInteraction = (data?: Record<string, unknown>): JobInteraction => {
 		const pinnedValue = data?.['pinned'];
 		const submittedValue = data?.['submitted'];
+		const hiddenValue = data?.['hidden'];
 		const pinnedAt = toDateString(data?.['pinnedAt']);
 		const submittedAt = toDateString(data?.['submittedAt']);
 		return {
+			hidden: typeof hiddenValue === 'boolean' ? hiddenValue : undefined,
 			pinned: typeof pinnedValue === 'boolean' ? pinnedValue : undefined,
 			submitted: typeof submittedValue === 'boolean' ? submittedValue : undefined,
 			...(pinnedAt ? { pinnedAt } : {}),
@@ -130,6 +140,9 @@ type JobDetail = {
 					data.apply_url
 				)
 			};
+			if (userId) {
+				void loadCompanyStatus();
+			}
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to load job';
 		} finally {
@@ -157,7 +170,26 @@ type JobDetail = {
 		}
 	};
 
-	const toggleJobFlag = async (key: 'pinned' | 'submitted') => {
+	const loadCompanyStatus = async () => {
+		statusError = '';
+		if (!userId || !job) {
+			companyStatus = undefined;
+			return;
+		}
+
+		const db = getDb();
+		if (!db) return;
+
+		try {
+			const snap = await getDoc(doc(db, 'users', userId, 'company_status', companyKey(job)));
+			const raw = snap.data()?.['status'];
+			companyStatus = raw === 'blacklist' || raw === 'whitelist' ? (raw as CompanyStatus) : undefined;
+		} catch (err) {
+			statusError = err instanceof Error ? err.message : 'Failed to load company status';
+		}
+	};
+
+	const toggleJobFlag = async (key: 'hidden' | 'pinned' | 'submitted') => {
 		if (!userId) {
 			interactionError = 'Sign in to save job actions';
 			return;
@@ -200,6 +232,41 @@ type JobDetail = {
 		}
 	};
 
+	const setCompanyStatus = async (status?: CompanyStatus) => {
+		if (!userId || !job) {
+			statusError = 'Sign in to manage this company';
+			return;
+		}
+
+		const db = getDb();
+		if (!db) {
+			statusError = 'Firestore not available';
+			return;
+		}
+
+		statusSaving = true;
+		statusError = '';
+		companyStatus = status;
+		const ref = doc(db, 'users', userId, 'company_status', companyKey(job));
+		try {
+			if (!status) {
+				await deleteDoc(ref);
+			} else {
+				await setDoc(ref, { status });
+			}
+		} catch (err) {
+			statusError = err instanceof Error ? err.message : 'Failed to update company status';
+			await loadCompanyStatus();
+		} finally {
+			statusSaving = false;
+		}
+	};
+
+	const toggleCompanyStatus = (status: CompanyStatus) => {
+		const nextStatus = companyStatus === status ? undefined : status;
+		void setCompanyStatus(nextStatus);
+	};
+
 	onMount(() => {
 		const stopAuth = onAuthChange(async (user) => {
 			userId = user?.uid ?? '';
@@ -209,6 +276,9 @@ type JobDetail = {
 				interactionError = '';
 				interactionLoading = false;
 				savingInteraction = false;
+				companyStatus = undefined;
+				statusError = '';
+				statusSaving = false;
 				error = 'Sign in to view this job';
 				loading = false;
 				return;
@@ -225,6 +295,7 @@ type JobDetail = {
 				void loadJob();
 			}
 			void loadInteraction();
+			void loadCompanyStatus();
 		});
 
 		return () => stopAuth?.();
@@ -265,13 +336,16 @@ type JobDetail = {
 							<span class="pill subtle">Posted {formatDate(job.date_posted)}</span>
 						</div>
 						<JobMetaPills job={job} />
-						{#if interaction.pinned || interaction.submitted}
+						{#if interaction.pinned || interaction.submitted || interaction.hidden}
 							<div class="meta-row">
 								{#if interaction.pinned}
 									<span class="pill accent">Pinned</span>
 								{/if}
 								{#if interaction.submitted}
 									<span class="pill success">Submitted</span>
+								{/if}
+								{#if interaction.hidden}
+									<span class="pill neutral subtle">Hidden</span>
 								{/if}
 							</div>
 						{/if}
@@ -280,55 +354,32 @@ type JobDetail = {
 						{/if}
 					</div>
 					<div class="actions">
-						<div class="action-rail" aria-label="Job actions">
-							{#if job.url}
-								<a class="action-chip primary" href={job.url} target="_blank" rel="noreferrer">
-									<svg viewBox="0 0 24 24" aria-hidden="true">
-										<path
-											d="M13 3a1 1 0 1 0 0 2h3.586l-6.293 6.293a1 1 0 0 0 1.414 1.414L18 6.414V10a1 1 0 1 0 2 0V4a1 1 0 0 0-1-1h-6Z"
-											fill="currentColor"
-										/>
-										<path
-											d="M5 5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3a1 1 0 1 0-2 0v3H5V7h3a1 1 0 1 0 0-2H5Z"
-											fill="currentColor"
-										/>
-									</svg>
-									<span>View / Apply</span>
-								</a>
-							{/if}
-							<button
-								class="action-chip"
-								class:active={interaction.pinned}
-								on:click={() => toggleJobFlag('pinned')}
+						<div class="action-rail" aria-label="Job and company actions">
+							<JobActionGroup
+								variant="chip"
+								directHref={job.url ?? companyPath(job)}
+								directLabel={job.url ? 'View / Apply' : 'Open details'}
+								directIsExternal={Boolean(job.url)}
+								pinned={Boolean(interaction.pinned)}
+								submitted={Boolean(interaction.submitted)}
+								hidden={Boolean(interaction.hidden)}
+								on:pin={() => toggleJobFlag('pinned')}
+								on:submit={() => toggleJobFlag('submitted')}
+								on:hide={() => toggleJobFlag('hidden')}
 								disabled={savingInteraction || interactionLoading}
-								aria-pressed={interaction.pinned ? 'true' : 'false'}
-								title={interaction.pinned ? 'Unpin this job' : 'Pin this job'}
-							>
-								<svg viewBox="0 0 24 24" aria-hidden="true">
-									<path
-										d="M6 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16l-7-3-7 3V4Z"
-										fill="currentColor"
-									/>
-								</svg>
-								<span>{interaction.pinned ? 'Pinned' : 'Pin job'}</span>
-							</button>
-							<button
-								class="action-chip"
-								class:active={interaction.submitted}
-								on:click={() => toggleJobFlag('submitted')}
-								disabled={savingInteraction || interactionLoading}
-								aria-pressed={interaction.submitted ? 'true' : 'false'}
-								title={interaction.submitted ? 'Undo submitted' : 'Mark submitted'}
-							>
-								<svg viewBox="0 0 24 24" aria-hidden="true">
-									<path
-										d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm-1 14-4-4 1.4-1.4L11 13.2l5.6-5.6L18 9l-7 7Z"
-										fill="currentColor"
-									/>
-								</svg>
-								<span>{interaction.submitted ? 'Submitted' : 'Mark submitted'}</span>
-							</button>
+							/>
+							<CompanyStatusGroup
+								variant="chip"
+								status={companyStatus}
+								visitHref={companyPath(job)}
+								on:whitelist={() => toggleCompanyStatus('whitelist')}
+								on:blacklist={() => toggleCompanyStatus('blacklist')}
+								disabled={statusSaving}
+							/>
 						</div>
+						{#if statusError}
+							<p class="meta error">{statusError}</p>
+						{/if}
 					</div>
 				</header>
 
@@ -422,46 +473,6 @@ type JobDetail = {
 		gap: 10px;
 		flex-wrap: wrap;
 		justify-content: flex-end;
-	}
-
-	.action-chip {
-		display: inline-flex;
-		align-items: center;
-		gap: 8px;
-		padding: 8px 12px;
-		border-radius: 12px;
-		border: 1px solid rgba(226, 232, 240, 0.18);
-		background: rgba(15, 23, 42, 0.7);
-		color: #e2e8f0;
-		cursor: pointer;
-		font-weight: 700;
-		transition: border-color 120ms ease, transform 120ms ease, background-color 120ms ease;
-	}
-
-	.action-chip svg {
-		width: 18px;
-		height: 18px;
-	}
-
-	.action-chip:hover:not(:disabled) {
-		border-color: rgba(148, 163, 184, 0.6);
-		transform: translateY(-1px);
-	}
-
-	.action-chip.active {
-		background: linear-gradient(135deg, rgba(59, 130, 246, 0.25), rgba(16, 185, 129, 0.25));
-		border-color: rgba(59, 130, 246, 0.65);
-	}
-
-	.action-chip:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
-	}
-
-	.action-chip.primary {
-		background: linear-gradient(135deg, rgba(59, 130, 246, 0.3), rgba(14, 165, 233, 0.3));
-		border-color: rgba(96, 165, 250, 0.65);
-		box-shadow: 0 8px 18px rgba(14, 165, 233, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.08);
 	}
 
 	@media (max-width: 640px) {

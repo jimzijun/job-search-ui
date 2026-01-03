@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { JobMetaPills } from '$lib';
+	import { CompanyStatusGroup, JobActionGroup, JobMetaPills } from '$lib';
 
 	type JobCardStatus = 'blacklist' | 'whitelist';
 
@@ -39,14 +39,16 @@
 	export let onToggleHidden: (() => void) | undefined = undefined;
 	export let onWhitelist: (() => void) | undefined = undefined;
 	export let onBlacklist: (() => void) | undefined = undefined;
+	export let showCompanyActions = true;
+	export let actionsDisabled = false;
 
-	const directLabel = directIsExternal ? 'Job link' : 'View details';
-	const showActionRail =
-		Boolean(onTogglePinned) ||
-		Boolean(onToggleSubmitted) ||
-		Boolean(onToggleHidden) ||
-		Boolean(onWhitelist) ||
-		Boolean(onBlacklist);
+	let directLabel = 'View details';
+	let showJobActions = true;
+	let showCompanyActionsComputed = true;
+
+	$: directLabel = directIsExternal ? 'Visit role' : 'View details';
+	$: showJobActions = Boolean(onTogglePinned || onToggleSubmitted || onToggleHidden || directHref);
+	$: showCompanyActionsComputed = showCompanyActions && Boolean(onWhitelist || onBlacklist);
 </script>
 
 <div class="card" data-hidden={isHidden}>
@@ -90,98 +92,35 @@
 		</div>
 		<div class="card__side">
 			<div class="card__top-actions">
-				<a
-					class="direct-link"
-					href={directHref}
-					target={directIsExternal ? '_blank' : undefined}
-					rel={directIsExternal ? 'noreferrer' : undefined}
-				>
-					{directLabel}
-				</a>
 				<div class="date">{formatDate(job.date_posted)}</div>
 			</div>
-			{#if showActionRail}
+			{#if showJobActions || showCompanyActionsComputed}
 				<div class="card__action-rail" aria-label="Job and company actions">
-					{#if onTogglePinned}
-						<button
-							class="icon-button"
-							class:selected={isPinned}
-							on:click={onTogglePinned}
-							title={isPinned ? 'Unpin' : 'Pin'}
-							aria-label={isPinned ? 'Unpin job' : 'Pin job'}
-						>
-							<svg viewBox="0 0 24 24" aria-hidden="true">
-								<path d="M6 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16l-7-3-7 3V4Z" fill="currentColor" />
-							</svg>
-							<span class="sr-only">{isPinned ? 'Unpin' : 'Pin'}</span>
-						</button>
+					{#if showJobActions}
+						<JobActionGroup
+							variant="icon"
+							directHref={directHref}
+							directLabel={directLabel}
+							directIsExternal={directIsExternal}
+							pinned={isPinned}
+							submitted={isSubmitted}
+							hidden={isHidden}
+							disabled={actionsDisabled}
+							showPin={Boolean(onTogglePinned)}
+							showSubmit={Boolean(onToggleSubmitted)}
+							showHide={Boolean(onToggleHidden)}
+							on:pin={() => onTogglePinned?.()}
+							on:submit={() => onToggleSubmitted?.()}
+							on:hide={() => onToggleHidden?.()}
+						/>
 					{/if}
-					{#if onToggleSubmitted}
-						<button
-							class="icon-button"
-							class:selected={isSubmitted}
-							on:click={onToggleSubmitted}
-							title={isSubmitted ? 'Undo submitted' : 'Mark submitted'}
-							aria-label={isSubmitted ? 'Undo submitted' : 'Mark submitted'}
-						>
-							<svg viewBox="0 0 24 24" aria-hidden="true">
-								<path
-									d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm-1 14-4-4 1.4-1.4L11 13.2l5.6-5.6L18 9l-7 7Z"
-									fill="currentColor"
-								/>
-							</svg>
-							<span class="sr-only">{isSubmitted ? 'Undo submitted' : 'Mark submitted'}</span>
-						</button>
-					{/if}
-					{#if onToggleHidden}
-						<button
-							class="icon-button ghost"
-							on:click={onToggleHidden}
-							title={isHidden ? 'Unhide' : 'Hide'}
-							aria-label={isHidden ? 'Unhide job' : 'Hide job'}
-						>
-							<svg viewBox="0 0 24 24" aria-hidden="true">
-								<path
-									d="M12 5c-4.8 0-8.8 3-10 7 1.2 4 5.2 7 10 7s8.8-3 10-7c-1.2-4-5.2-7-10-7Zm0 12a5 5 0 1 1 0-10 5 5 0 0 1 0 10Zm0-3a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"
-									fill="currentColor"
-								/>
-							</svg>
-							<span class="sr-only">{isHidden ? 'Unhide' : 'Hide'}</span>
-						</button>
-					{/if}
-					{#if onWhitelist}
-						<button
-							class="icon-button"
-							class:selected={companyStatus === 'whitelist'}
-							on:click={onWhitelist}
-							title="Whitelist company"
-							aria-label="Whitelist company"
-						>
-							<svg viewBox="0 0 24 24" aria-hidden="true">
-								<path
-									d="M12 3 4 6v5c0 4 2.7 7.6 8 9 5.3-1.4 8-5 8-9V6l-8-3Zm-1 11-2.5-2.5 1.4-1.4L11 11.2l3.6-3.6 1.4 1.4L11 14Z"
-									fill="currentColor"
-								/>
-							</svg>
-							<span class="sr-only">Whitelist company</span>
-						</button>
-					{/if}
-					{#if onBlacklist}
-						<button
-							class="icon-button danger"
-							class:selected={companyStatus === 'blacklist'}
-							on:click={onBlacklist}
-							title="Blacklist company"
-							aria-label="Blacklist company"
-						>
-							<svg viewBox="0 0 24 24" aria-hidden="true">
-								<path
-									d="M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16Zm-6 8a6 6 0 0 1 1.1-3.4L15.4 17A6 6 0 0 1 6 12Zm6 6a6 6 0 0 1-3.4-1.1L16 9.4A6 6 0 0 1 12 18Z"
-									fill="currentColor"
-								/>
-							</svg>
-							<span class="sr-only">Blacklist company</span>
-						</button>
+					{#if showCompanyActionsComputed}
+						<CompanyStatusGroup
+							variant="icon"
+							status={companyStatus}
+							on:whitelist={() => onWhitelist?.()}
+							on:blacklist={() => onBlacklist?.()}
+						/>
 					{/if}
 				</div>
 			{/if}
@@ -289,26 +228,6 @@
 		gap: 6px;
 	}
 
-	.direct-link {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		background: rgba(37, 99, 235, 0.16);
-		color: #bfdbfe;
-		border: 1px solid rgba(37, 99, 235, 0.35);
-		border-radius: 10px;
-		padding: 6px 10px;
-		font-weight: 600;
-		font-size: 13px;
-		text-decoration: none;
-		transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
-	}
-
-	.direct-link:hover {
-		transform: translateY(-1px);
-		border-color: rgba(96, 165, 250, 0.8);
-	}
-
 	.company-chip {
 		display: inline-flex;
 		align-items: center;
@@ -341,60 +260,7 @@
 		color: #e2e8f0;
 	}
 
-	button {
-		background: rgba(37, 99, 235, 0.16);
-		color: #bfdbfe;
-		border: 1px solid rgba(37, 99, 235, 0.35);
-		border-radius: 10px;
-		padding: 8px 12px;
-		font-weight: 600;
-		font-size: 13px;
-		cursor: pointer;
-		transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
-	}
-
-	button:hover {
-		transform: translateY(-1px);
-		border-color: rgba(96, 165, 250, 0.8);
-	}
-
-	button.selected {
-		background: #3b82f6;
-		color: #0b1220;
-		border-color: #60a5fa;
-	}
-
-	button.ghost {
-		background: transparent;
-		color: #e2e8f0;
-		border-color: rgba(226, 232, 240, 0.18);
-	}
-
-	button.danger {
-		border-color: rgba(248, 113, 113, 0.6);
-		color: #fecdd3;
-		background: rgba(248, 113, 113, 0.12);
-	}
-
-	button.danger.selected {
-		background: #ef4444;
-		color: #0b1220;
-		border-color: #fca5a5;
-	}
-
-	.icon-button {
-		width: 36px;
-		height: 36px;
-		padding: 6px;
-		display: grid;
-		place-items: center;
-		border-radius: 12px;
-	}
-
-	.icon-button svg {
-		width: 18px;
-		height: 18px;
-	}
+	/* action buttons now provided by JobActionGroup + CompanyStatusGroup */
 
 	.pill {
 		background: rgba(37, 99, 235, 0.18);

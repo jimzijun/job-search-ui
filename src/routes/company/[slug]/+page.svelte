@@ -1,17 +1,18 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import {
-		collection,
-		deleteDoc,
-		doc,
-		getDoc,
-		getDocs,
-		limit,
-		query,
-		setDoc,
-		where
-	} from 'firebase/firestore';
-	import { JobCard } from '$lib';
+import {
+	collection,
+	deleteDoc,
+	deleteField,
+	doc,
+	getDoc,
+	getDocs,
+	limit,
+	query,
+	setDoc,
+	where
+} from 'firebase/firestore';
+	import { CompanyStatusGroup, JobCard } from '$lib';
 	import { getDb, onAuthChange } from '$lib/firebase';
 
 	export let params: { slug: string };
@@ -26,6 +27,13 @@
 	};
 
 	type CompanyStatus = 'blacklist' | 'whitelist';
+	type JobInteraction = {
+		hidden?: boolean;
+		pinned?: boolean;
+		submitted?: boolean;
+		pinnedAt?: string;
+		submittedAt?: string;
+	};
 
 	type Job = {
 		id: string;
@@ -50,6 +58,9 @@
 	let companyStatus: CompanyStatus | undefined;
 	let statusError = '';
 	let statusSaving = false;
+	let jobInteractions: Record<string, JobInteraction> = {};
+	let interactionError = '';
+	let interactionSaving = false;
 
 	const decodedName = decodeURIComponent(params.slug);
 
@@ -67,6 +78,24 @@
 
 	const normalizeCompanyStatus = (value: unknown): CompanyStatus | undefined =>
 		value === 'blacklist' || value === 'whitelist' ? value : undefined;
+
+	const normalizeInteraction = (data?: Record<string, unknown>): JobInteraction => {
+		if (!data) return {};
+		const pinned = asOptionalBoolean(data.pinned);
+		const submitted = asOptionalBoolean(data.submitted);
+		const hidden = asOptionalBoolean(data.hidden);
+		const pinnedAt = typeof data.pinnedAt === 'string' ? data.pinnedAt : undefined;
+		const submittedAt = typeof data.submittedAt === 'string' ? data.submittedAt : undefined;
+		return {
+			hidden,
+			pinned,
+			submitted,
+			...(pinnedAt ? { pinnedAt } : {}),
+			...(submittedAt ? { submittedAt } : {})
+		};
+	};
+
+	const getInteraction = (jobId: string) => jobInteractions[jobId] ?? {};
 
 	const jobPath = (job: Job) => `/jobs/${job.id}`;
 	const companyPath = `/company/${params.slug}`;
@@ -123,6 +152,79 @@
 	const toggleCompanyStatus = (status: CompanyStatus) => {
 		const nextStatus = companyStatus === status ? undefined : status;
 		void setCompanyStatus(nextStatus);
+	};
+
+	const loadJobInteractions = async () => {
+		if (!userId || jobs.length === 0) return;
+		const db = getDb();
+		if (!db) return;
+
+		interactionError = '';
+		const loaded: Record<string, JobInteraction> = {};
+		try {
+			await Promise.all(
+				jobs.map(async (job) => {
+					const snap = await getDoc(doc(db, 'users', userId, 'job_interactions', job.id));
+					loaded[job.id] = snap.exists() ? normalizeInteraction(snap.data() as Record<string, unknown>) : {};
+				})
+			);
+			jobInteractions = loaded;
+		} catch (err) {
+			interactionError = err instanceof Error ? err.message : 'Failed to load job actions';
+		}
+	};
+
+	const setJobInteraction = async (
+		jobId: string,
+		updates: Partial<JobInteraction>,
+		firestoreUpdates?: Record<string, unknown>
+	) => {
+		if (!userId) {
+			interactionError = 'Sign in to save job actions';
+			return;
+		}
+		const db = getDb();
+		if (!db) {
+			interactionError = 'Firestore not available';
+			return;
+		}
+
+		const next = normalizeInteraction({ ...getInteraction(jobId), ...updates });
+		jobInteractions = { ...jobInteractions, [jobId]: next };
+		interactionSaving = true;
+		interactionError = '';
+
+		try {
+			await setDoc(
+				doc(db, 'users', userId, 'job_interactions', jobId),
+				firestoreUpdates ?? updates,
+				{ merge: true }
+			);
+		} catch (err) {
+			interactionError = err instanceof Error ? err.message : 'Failed to save job action';
+			await loadJobInteractions();
+		} finally {
+			interactionSaving = false;
+		}
+	};
+
+	const toggleJobFlag = async (jobId: string, key: 'hidden' | 'pinned' | 'submitted') => {
+		const current = Boolean(getInteraction(jobId)[key]);
+		const nowIso = new Date().toISOString();
+		const updates: Partial<JobInteraction> = { [key]: !current };
+		const firestoreUpdates: Record<string, unknown> = { [key]: !current };
+
+		if (key === 'pinned') {
+			updates.pinnedAt = !current ? nowIso : undefined;
+			firestoreUpdates.pinnedAt = !current ? nowIso : deleteField();
+		}
+
+		if (key === 'submitted') {
+			updates.submittedAt = !current ? nowIso : undefined;
+			firestoreUpdates.submittedAt = !current ? nowIso : deleteField();
+		}
+
+		await setJobInteraction(jobId, updates, firestoreUpdates);
 	};
 
 	const loadCompany = async () => {
@@ -207,6 +309,7 @@
 			}
 
 			jobs = jobs.sort((a, b) => (b.date_posted?.getTime() ?? 0) - (a.date_posted?.getTime() ?? 0));
+			void loadJobInteractions();
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to load company';
 		} finally {
@@ -225,6 +328,9 @@
 				jobs = [];
 				error = 'Sign in to view this company';
 				loading = false;
+				jobInteractions = {};
+				interactionError = '';
+				interactionSaving = false;
 				return;
 			}
 
@@ -239,6 +345,8 @@
 			userId = user.uid;
 			if (!company) {
 				void loadCompany();
+			} else {
+				void loadJobInteractions();
 			}
 			void loadCompanyStatus();
 		});
@@ -277,34 +385,22 @@
 					</div>
 
 					<div class="actions">
-						<div class="status-actions">
-							{#if company.website}
-								<a class="status-button visit" href={company.website} target="_blank" rel="noreferrer">
-									Visit site
-								</a>
-							{/if}
-							<button
-								class="status-button"
-								class:selected={companyStatus === 'whitelist'}
-								on:click={() => toggleCompanyStatus('whitelist')}
-								disabled={statusSaving}
-							>
-								{companyStatus === 'whitelist' ? 'Whitelisted' : 'Whitelist'}
-							</button>
-							<button
-								class="status-button danger"
-								class:selected={companyStatus === 'blacklist'}
-								on:click={() => toggleCompanyStatus('blacklist')}
-								disabled={statusSaving}
-							>
-								{companyStatus === 'blacklist' ? 'Blacklisted' : 'Blacklist'}
-							</button>
-						</div>
+						<CompanyStatusGroup
+							variant="chip"
+							status={companyStatus}
+							visitHref={company.website}
+							on:whitelist={() => toggleCompanyStatus('whitelist')}
+							on:blacklist={() => toggleCompanyStatus('blacklist')}
+							disabled={statusSaving}
+						/>
 					</div>
 				</header>
 
 				{#if statusError}
 					<p class="meta error status-error">Status: {statusError}</p>
+				{/if}
+				{#if interactionError}
+					<p class="meta error status-error">Actions: {interactionError}</p>
 				{/if}
 
 				<section class="body">
@@ -353,7 +449,19 @@
 									directIsExternal={Boolean(job.url)}
 									companyLogo={company?.logo}
 									companyStatus={companyStatus}
+									isPinned={Boolean(getInteraction(job.id).pinned)}
+									isSubmitted={Boolean(getInteraction(job.id).submitted)}
+									isHidden={Boolean(getInteraction(job.id).hidden)}
+									savedMeta={{
+										pinnedAt: getInteraction(job.id).pinnedAt,
+										submittedAt: getInteraction(job.id).submittedAt
+									}}
 									formatDate={formatDate}
+									showCompanyActions={false}
+									actionsDisabled={interactionSaving}
+									onTogglePinned={() => toggleJobFlag(job.id, 'pinned')}
+									onToggleSubmitted={() => toggleJobFlag(job.id, 'submitted')}
+									onToggleHidden={() => toggleJobFlag(job.id, 'hidden')}
 								/>
 							{/each}
 						</div>
@@ -518,63 +626,6 @@
 		margin-left: auto;
 		flex-wrap: wrap;
 		justify-content: flex-end;
-	}
-
-	.status-actions {
-		display: flex;
-		gap: 8px;
-		flex-wrap: wrap;
-		justify-content: flex-end;
-	}
-
-	.status-button {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		border-radius: 10px;
-		border: 1px solid rgba(226, 232, 240, 0.18);
-		background: rgba(255, 255, 255, 0.03);
-		color: #e2e8f0;
-		font-weight: 700;
-		padding: 8px 12px;
-		cursor: pointer;
-		transition: border-color 120ms ease, transform 120ms ease, background 120ms ease;
-		text-decoration: none;
-	}
-
-	.status-button:hover {
-		transform: translateY(-1px);
-		border-color: rgba(226, 232, 240, 0.32);
-	}
-
-	.status-button.selected {
-		background: rgba(34, 197, 94, 0.15);
-		border-color: rgba(34, 197, 94, 0.45);
-	}
-
-	.status-button.visit {
-		background: linear-gradient(135deg, rgba(37, 99, 235, 0.2), rgba(34, 197, 94, 0.2));
-		border-color: rgba(226, 232, 240, 0.24);
-		color: #e2e8f0;
-	}
-
-	.status-button.visit:hover {
-		border-color: rgba(226, 232, 240, 0.4);
-	}
-
-	.status-button.danger {
-		border-color: rgba(248, 113, 113, 0.35);
-		color: #fecdd3;
-	}
-
-	.status-button.danger.selected {
-		background: rgba(248, 113, 113, 0.14);
-		border-color: rgba(248, 113, 113, 0.6);
-	}
-
-	.status-button:disabled {
-		opacity: 0.7;
-		cursor: not-allowed;
 	}
 
 	.ghost {
