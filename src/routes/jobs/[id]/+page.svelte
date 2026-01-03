@@ -371,7 +371,6 @@ type JobDetail = {
 							<CompanyStatusGroup
 								variant="chip"
 								status={companyStatus}
-								visitHref={companyPath(job)}
 								on:whitelist={() => toggleCompanyStatus('whitelist')}
 								on:blacklist={() => toggleCompanyStatus('blacklist')}
 								disabled={statusSaving}
