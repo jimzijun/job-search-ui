@@ -22,6 +22,8 @@
 		submittedAt?: string;
 	};
 
+	type ActionVariant = 'icon' | 'chip';
+
 	export let job: JobCardJob;
 	export let jobHref: string;
 	export let companyHref: string;
@@ -39,6 +41,7 @@
 	export let onToggleHidden: (() => void) | undefined = undefined;
 	export let onWhitelist: (() => void) | undefined = undefined;
 	export let onBlacklist: (() => void) | undefined = undefined;
+	export let actionVariant: ActionVariant = 'icon';
 	export let showCompanyActions = true;
 	export let actionsDisabled = false;
 
@@ -98,7 +101,7 @@
 				<div class="card__action-rail" aria-label="Job and company actions">
 					{#if showJobActions}
 						<JobActionGroup
-							variant="icon"
+							variant={actionVariant}
 							directHref={directHref}
 							directLabel={directLabel}
 							directIsExternal={directIsExternal}
@@ -116,7 +119,7 @@
 					{/if}
 					{#if showCompanyActionsComputed}
 						<CompanyStatusGroup
-							variant="icon"
+							variant={actionVariant}
 							status={companyStatus}
 							on:whitelist={() => onWhitelist?.()}
 							on:blacklist={() => onBlacklist?.()}
@@ -140,9 +143,8 @@
 	}
 
 	.card__grid {
-		display: grid;
-		grid-template-columns: minmax(0, 3fr) minmax(180px, 1fr);
-		align-items: start;
+		display: flex;
+		flex-direction: column;
 		gap: 12px;
 	}
 
@@ -156,8 +158,8 @@
 		display: flex;
 		flex-direction: column;
 		gap: 10px;
-		align-items: flex-end;
-		min-width: 180px;
+		align-items: flex-start;
+		width: 100%;
 	}
 
 	.card[data-hidden='true'] {
@@ -174,11 +176,11 @@
 	.card__top-actions {
 		display: inline-flex;
 		align-items: center;
-		justify-content: flex-end;
+		justify-content: space-between;
 		width: 100%;
 		gap: 8px;
 		flex-wrap: wrap;
-		text-align: right;
+		text-align: left;
 	}
 
 	.title-link {
@@ -224,7 +226,7 @@
 	.card__action-rail {
 		display: flex;
 		flex-wrap: wrap;
-		justify-content: flex-end;
+		justify-content: flex-start;
 		gap: 6px;
 	}
 

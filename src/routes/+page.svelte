@@ -981,6 +981,7 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 											isSubmitted={isSubmitted(job)}
 											isHidden={isHidden(job)}
 											formatDate={formatDate}
+											actionVariant="chip"
 											onTogglePinned={() => toggleJobFlag(job.id, 'pinned')}
 											onToggleSubmitted={() => toggleJobFlag(job.id, 'submitted')}
 											onToggleHidden={() => toggleJobFlag(job.id, 'hidden')}
@@ -1018,6 +1019,7 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 										isSubmitted={isSubmitted(job)}
 										isHidden={isHidden(job)}
 										formatDate={formatDate}
+										actionVariant="chip"
 										onTogglePinned={() => toggleJobFlag(job.id, 'pinned')}
 										onToggleSubmitted={() => toggleJobFlag(job.id, 'submitted')}
 										onToggleHidden={() => toggleJobFlag(job.id, 'hidden')}
@@ -1059,6 +1061,7 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 										isSubmitted={isSubmitted(job)}
 										isHidden={isHidden(job)}
 										formatDate={formatDate}
+										actionVariant="chip"
 										savedMeta={{
 											pinnedAt: getInteraction(job.id).pinnedAt,
 											submittedAt: getInteraction(job.id).submittedAt
@@ -1228,14 +1231,17 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 
 	.tab-switch button {
 		display: flex;
-		flex-direction: column;
-		align-items: flex-start;
+		align-items: center;
 		justify-content: center;
-		gap: 4px;
+		gap: 10px;
 	}
 
 	.tab-switch__title {
 		font-weight: 700;
+	}
+
+	.tab-switch .meta {
+		margin: 0;
 	}
 
 	.user-control {
