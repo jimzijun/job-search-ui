@@ -3,6 +3,7 @@
 	import { marked } from 'marked';
 	import { deleteField, doc, getDoc, setDoc } from 'firebase/firestore';
 	import { getDb, onAuthChange } from '$lib/firebase';
+	import { JobMetaPills } from '$lib';
 
 	export let params: { id: string };
 
@@ -261,29 +262,9 @@ type JobDetail = {
 						<h1>{job.title}</h1>
 						<div class="meta-row">
 							<a class="link" href={companyPath(job)}>{job.company}</a>
-							{#if job.location}
-								<span class="pill neutral">{job.location}</span>
-							{/if}
 							<span class="pill subtle">Posted {formatDate(job.date_posted)}</span>
 						</div>
-						{#if job.job_type || job.experience_range || job.salary || job.has_python_keyword !== undefined}
-							<div class="meta-row">
-								{#if job.job_type}
-									<span class="pill neutral">{job.job_type}</span>
-								{/if}
-								{#if job.experience_range}
-									<span class="pill neutral">Experience: {job.experience_range}</span>
-								{/if}
-								{#if job.salary}
-									<span class="pill accent">Salary {job.salary}</span>
-								{/if}
-								{#if job.has_python_keyword === true}
-									<span class="pill success">Python keyword</span>
-								{:else if job.has_python_keyword === false}
-									<span class="pill neutral subtle">No Python keyword</span>
-								{/if}
-							</div>
-						{/if}
+						<JobMetaPills job={job} />
 						{#if interaction.pinned || interaction.submitted}
 							<div class="meta-row">
 								{#if interaction.pinned}

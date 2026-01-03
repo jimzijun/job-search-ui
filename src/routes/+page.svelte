@@ -796,7 +796,7 @@ const isJobHidden = (job: Job) => Boolean(getInteraction(job.id).hidden);
 			</div>
 
 			<div class="user-control">
-				<label>Active user</label>
+				<p class="meta-label">Active user</p>
 				<div class="user-control__field auth-row">
 					{#if !authReady}
 						<p class="meta">Checking sign-in…</p>

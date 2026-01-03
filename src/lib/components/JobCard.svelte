@@ -1,7 +1,9 @@
 <script lang="ts">
-	export type JobCardStatus = 'blacklist' | 'whitelist';
+	import { JobMetaPills } from '$lib';
 
-	export type JobCardJob = {
+	type JobCardStatus = 'blacklist' | 'whitelist';
+
+	type JobCardJob = {
 		id: string;
 		title: string;
 		company: string;
@@ -32,11 +34,11 @@
 	export let isHidden = false;
 	export let savedMeta: SavedMeta = {};
 	export let formatDate: (date?: Date | string) => string;
-	export let onTogglePinned: (() => void) | undefined;
-	export let onToggleSubmitted: (() => void) | undefined;
-	export let onToggleHidden: (() => void) | undefined;
-	export let onWhitelist: (() => void) | undefined;
-	export let onBlacklist: (() => void) | undefined;
+	export let onTogglePinned: (() => void) | undefined = undefined;
+	export let onToggleSubmitted: (() => void) | undefined = undefined;
+	export let onToggleHidden: (() => void) | undefined = undefined;
+	export let onWhitelist: (() => void) | undefined = undefined;
+	export let onBlacklist: (() => void) | undefined = undefined;
 
 	const directLabel = directIsExternal ? 'Job link' : 'View details';
 	const showActionRail =
@@ -62,39 +64,14 @@
 					{/if}
 					<span class="company-chip__name">{job.company}</span>
 				</a>
-				{#if job.location}
-					<span class="pill neutral">{job.location}</span>
-				{/if}
 			</div>
-			{#if job.job_type || job.experience_range || job.salary || job.has_python_keyword !== undefined}
-				<div class="card__details">
-					{#if job.job_type}
-						<span class="pill neutral">{job.job_type}</span>
-					{/if}
-					{#if job.experience_range}
-						<span class="pill neutral">Exp: {job.experience_range}</span>
-					{/if}
-					{#if job.salary}
-						<span class="pill accent">Salary {job.salary}</span>
-					{/if}
-					{#if job.has_python_keyword === true}
-						<span class="pill success">Python keyword</span>
-					{:else if job.has_python_keyword === false}
-						<span class="pill neutral subtle">No Python keyword</span>
-					{/if}
-				</div>
-			{/if}
+			<JobMetaPills job={job} companyStatus={companyStatus} />
 			<div class="card__labels">
 				{#if isPinned}
 					<span class="pill accent">Pinned</span>
 				{/if}
 				{#if isSubmitted}
 					<span class="pill success">Submitted</span>
-				{/if}
-				{#if companyStatus === 'whitelist'}
-					<span class="pill success subtle">Preferred company</span>
-				{:else if companyStatus === 'blacklist'}
-					<span class="pill danger subtle">Blacklisted</span>
 				{/if}
 				{#if isHidden}
 					<span class="pill neutral subtle">Hidden</span>
@@ -305,12 +282,6 @@
 		margin: 0;
 	}
 
-	.card__details {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 6px;
-	}
-
 	.card__action-rail {
 		display: flex;
 		flex-wrap: wrap;
@@ -451,12 +422,6 @@
 		background: rgba(16, 185, 129, 0.18);
 		color: #bbf7d0;
 		border-color: rgba(16, 185, 129, 0.4);
-	}
-
-	.pill.danger {
-		background: rgba(248, 113, 113, 0.16);
-		color: #fecdd3;
-		border-color: rgba(248, 113, 113, 0.4);
 	}
 
 	.pill.subtle {
