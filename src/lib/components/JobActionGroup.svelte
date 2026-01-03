@@ -55,7 +55,7 @@
 
 	{#if showPin}
 		<button
-			class={`action ${isIconVariant ? 'action--icon' : 'action--chip'}`}
+			class={`action ${isIconVariant ? 'action--icon' : 'action--chip'} action--warning`}
 			class:action--active={pinned}
 			on:click={handlePin}
 			disabled={disabled}
@@ -71,7 +71,7 @@
 
 	{#if showSubmit}
 		<button
-			class={`action ${isIconVariant ? 'action--icon' : 'action--chip'}`}
+			class={`action ${isIconVariant ? 'action--icon' : 'action--chip'} action--info`}
 			class:action--active={submitted}
 			on:click={handleSubmit}
 			disabled={disabled}
@@ -90,7 +90,7 @@
 
 	{#if showHide}
 		<button
-			class={`action ${isIconVariant ? 'action--icon' : 'action--chip'} action--ghost`}
+			class={`action ${isIconVariant ? 'action--icon' : 'action--chip'} action--muted`}
 			class:action--active={hidden}
 			on:click={handleHide}
 			disabled={disabled}

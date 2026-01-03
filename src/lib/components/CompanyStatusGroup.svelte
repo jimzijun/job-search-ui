@@ -43,7 +43,7 @@
 	{/if}
 
 	<button
-		class={`action ${isIconVariant ? 'action--icon' : 'action--chip'}`}
+		class={`action ${isIconVariant ? 'action--icon' : 'action--chip'} action--success`}
 		class:action--active={status === 'whitelist'}
 		on:click={handleWhitelist}
 		disabled={disabled}
