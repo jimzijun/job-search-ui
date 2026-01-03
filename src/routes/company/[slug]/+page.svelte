@@ -11,6 +11,7 @@
 		setDoc,
 		where
 	} from 'firebase/firestore';
+	import { JobCard } from '$lib';
 	import { getDb, onAuthChange } from '$lib/firebase';
 
 	export let params: { slug: string };
@@ -28,8 +29,15 @@
 
 	type Job = {
 		id: string;
+		company: string;
+		companySlug?: string;
 		title: string;
+		url?: string;
 		location?: string;
+		job_type?: string;
+		experience_range?: string;
+		salary?: string;
+		has_python_keyword?: boolean;
 		date_posted?: Date;
 	};
 
@@ -45,16 +53,23 @@
 
 	const decodedName = decodeURIComponent(params.slug);
 
-	const formatDate = (date?: Date) =>
-		date
-			? date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-			: 'Unknown';
+	const formatDate = (date?: Date | string) => {
+		if (!date) return 'Unknown';
+		const value = typeof date === 'string' ? new Date(date) : date;
+		if (Number.isNaN(value.getTime())) return 'Unknown';
+		return value.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+	};
 
 	const pickString = (...values: unknown[]) =>
 		values.find((value) => typeof value === 'string' && value.trim() !== '') as string | undefined;
 
+	const asOptionalBoolean = (value: unknown) => (typeof value === 'boolean' ? value : undefined);
+
 	const normalizeCompanyStatus = (value: unknown): CompanyStatus | undefined =>
 		value === 'blacklist' || value === 'whitelist' ? value : undefined;
+
+	const jobPath = (job: Job) => `/jobs/${job.id}`;
+	const companyPath = `/company/${params.slug}`;
 
 	const loadCompanyStatus = async () => {
 		statusError = '';
@@ -154,21 +169,33 @@
 				company = { name: decodedName };
 			}
 
+			const mapJob = (item: { id: string; data: () => Record<string, unknown> }): Job => {
+				const data = item.data() as Record<string, unknown>;
+				const dateValue =
+					data.date_posted && typeof data.date_posted === 'object' && 'toDate' in data.date_posted
+						? (data.date_posted as { toDate: () => Date }).toDate()
+						: undefined;
+
+				return {
+					id: item.id,
+					title: (data.title as string) ?? 'Untitled role',
+					company: pickString(data.company, decodedName) ?? decodedName,
+					companySlug: pickString(data.company_slug, params.slug),
+					url: pickString(data.url),
+					location: data.location as string | undefined,
+					job_type: pickString(data.job_type),
+					experience_range: pickString(data.experience_range),
+					salary: pickString(data.salary),
+					has_python_keyword: asOptionalBoolean(data.has_python_keyword),
+					date_posted: dateValue
+				};
+			};
+
 			const slugJobs = await getDocs(
 				query(collection(db, 'jobs'), where('company_slug', '==', params.slug), limit(20))
 			);
 
-			const jobsBySlug = slugJobs.docs.map((item) => {
-				const data = item.data() as Record<string, unknown>;
-				return {
-					id: item.id,
-					title: (data.title as string) ?? 'Untitled role',
-					location: data.location as string | undefined,
-					date_posted: data.date_posted && typeof data.date_posted === 'object' && 'toDate' in data.date_posted
-						? (data.date_posted as { toDate: () => Date }).toDate()
-						: undefined
-				};
-			});
+			const jobsBySlug = slugJobs.docs.map(mapJob);
 
 			if (jobsBySlug.length > 0) {
 				jobs = jobsBySlug;
@@ -176,17 +203,7 @@
 				const nameMatches = await getDocs(
 					query(collection(db, 'jobs'), where('company', '==', decodedName), limit(20))
 				);
-				jobs = nameMatches.docs.map((item) => {
-					const data = item.data() as Record<string, unknown>;
-					return {
-						id: item.id,
-						title: (data.title as string) ?? 'Untitled role',
-						location: data.location as string | undefined,
-						date_posted: data.date_posted && typeof data.date_posted === 'object' && 'toDate' in data.date_posted
-							? (data.date_posted as { toDate: () => Date }).toDate()
-							: undefined
-					};
-				});
+				jobs = nameMatches.docs.map(mapJob);
 			}
 
 			jobs = jobs.sort((a, b) => (b.date_posted?.getTime() ?? 0) - (a.date_posted?.getTime() ?? 0));
@@ -326,24 +343,20 @@
 					{#if jobs.length === 0}
 						<p class="meta">No jobs found for this company.</p>
 					{:else}
-						<ul class="job-list">
+						<div class="job-list">
 							{#each jobs as job (job.id)}
-								<li>
-									<a class="job-row" href={`/jobs/${job.id}`}>
-										<div>
-											<div class="job-title">{job.title}</div>
-											<div class="job-meta">
-												{#if job.location}
-													<span class="pill neutral">{job.location}</span>
-												{/if}
-												<span class="pill subtle">Posted {formatDate(job.date_posted)}</span>
-											</div>
-										</div>
-										<span class="arrow">→</span>
-									</a>
-								</li>
+								<JobCard
+									job={job}
+									jobHref={jobPath(job)}
+									companyHref={companyPath}
+									directHref={job.url ?? jobPath(job)}
+									directIsExternal={Boolean(job.url)}
+									companyLogo={company?.logo}
+									companyStatus={companyStatus}
+									formatDate={formatDate}
+								/>
 							{/each}
-						</ul>
+						</div>
 					{/if}
 				</section>
 			</article>
