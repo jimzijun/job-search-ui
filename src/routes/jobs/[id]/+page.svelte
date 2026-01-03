@@ -331,24 +331,25 @@ type JobDetail = {
 					<div>
 						<p class="eyebrow">Job description</p>
 						<h1>{job.title}</h1>
-						<div class="meta-row">
+						<div class="meta-row meta-row--company">
 							<a class="link" href={companyPath(job)}>{job.company}</a>
 							<span class="pill subtle">Posted {formatDate(job.date_posted)}</span>
 						</div>
-						<JobMetaPills job={job} />
-						{#if interaction.pinned || interaction.submitted || interaction.hidden}
-							<div class="meta-row">
-								{#if interaction.pinned}
-									<span class="pill accent">Pinned</span>
+						<div class="meta-tags">
+							<JobMetaPills job={job}>
+								{#if interaction.pinned || interaction.submitted || interaction.hidden}
+									{#if interaction.pinned}
+										<span class="pill accent">Pinned</span>
+									{/if}
+									{#if interaction.submitted}
+										<span class="pill success">Submitted</span>
+									{/if}
+									{#if interaction.hidden}
+										<span class="pill neutral subtle">Hidden</span>
+									{/if}
 								{/if}
-								{#if interaction.submitted}
-									<span class="pill success">Submitted</span>
-								{/if}
-								{#if interaction.hidden}
-									<span class="pill neutral subtle">Hidden</span>
-								{/if}
-							</div>
-						{/if}
+							</JobMetaPills>
+						</div>
 						{#if interactionError}
 							<p class="meta error">{interactionError}</p>
 						{/if}
@@ -514,6 +515,15 @@ type JobDetail = {
 		gap: 8px;
 		flex-wrap: wrap;
 		align-items: center;
+	}
+
+	.meta-row--company {
+		margin-bottom: 4px;
+	}
+
+	.meta-tags {
+		display: block;
+		margin-top: 6px;
 	}
 
 	.link {

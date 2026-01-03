@@ -11,6 +11,21 @@
 
 	export let job: JobMeta;
 	export let companyStatus: JobMetaCompanyStatus | undefined = undefined;
+
+	let experienceClass = 'neutral';
+
+	const experienceTone = (range?: string) => {
+		const matches = range?.match(/\d+(?:\.\d+)?/g);
+		if (!matches?.length) return 'neutral';
+
+		const years = Math.max(...matches.map(Number));
+		if (years <= 5) return 'success';
+		if (years <= 8) return 'warning';
+		if (years <= 11) return 'caution';
+		return 'danger';
+	};
+
+	$: experienceClass = experienceTone(job.experience_range);
 </script>
 
 <div class="meta-row">
@@ -21,7 +36,7 @@
 		<span class="pill neutral">{job.job_type}</span>
 	{/if}
 	{#if job.experience_range}
-		<span class="pill neutral">Experience: {job.experience_range}</span>
+		<span class={`pill ${experienceClass}`}>Experience: {job.experience_range}</span>
 	{/if}
 	{#if job.salary}
 		<span class="pill accent">Salary {job.salary}</span>
@@ -36,6 +51,7 @@
 	{:else if companyStatus === 'blacklist'}
 		<span class="pill danger subtle">Blacklisted</span>
 	{/if}
+	<slot />
 </div>
 
 <style>
@@ -78,6 +94,18 @@
 		background: rgba(248, 113, 113, 0.16);
 		color: #fecdd3;
 		border-color: rgba(248, 113, 113, 0.4);
+	}
+
+	.pill.warning {
+		background: rgba(234, 179, 8, 0.18);
+		color: #fef9c3;
+		border-color: rgba(234, 179, 8, 0.35);
+	}
+
+	.pill.caution {
+		background: rgba(249, 115, 22, 0.18);
+		color: #ffedd5;
+		border-color: rgba(249, 115, 22, 0.38);
 	}
 
 	.pill.subtle {
